@@ -1,0 +1,22 @@
+apiVersion: ipman.dialo.ai/v1
+kind: Ipman
+metadata:
+  name: sodies-nix
+  namespace: default
+spec:
+  name: "3s"
+  remoteAddr: "13.60.220.237"
+  localId: "145.239.135.194"
+  remoteId: "13.60.220.237"
+  secretRef:
+    name: "ipsec-secret"
+    namespace: "default"
+    key: "psk"
+  children:
+    - name: "3s"
+      localTs: "10.0.2.0/24"
+      remoteTs: "10.0.1.0/24"
+      podNameIpMap:
+        pod1: "10.0.2.1"
+        pod2: "10.0.2.2"
+  nodeName: "node-01"

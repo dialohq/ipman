@@ -1,0 +1,12 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: ipman-access-pods-binding
+subjects:
+- kind: ServiceAccount
+  name: ipman-service-account
+  namespace: ims
+roleRef:
+  kind: ClusterRole
+  name: cluster-pod-access
+  apiGroup: rbac.authorization.k8s.io

@@ -1,0 +1,14 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-pod-access
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "watch", "list", "update", "create"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "watch", "list", "update", "create"]
+- apiGroups: ["ipman.dialo.ai"]
+  resources: ["ipmen"]
+  verbs: ["get", "watch", "list", "update", "create"]
