@@ -269,18 +269,34 @@ func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret) corev1.
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: CharonConfVolume, MountPath: "/etc/swanctl"},
 		},
+		SecurityContext: r.createDefaultSecurityContext(),
 	}
 }
 
-func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
+// rke2 requires seccopm profile set to runtime default or localhost
+func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
+	//TODO: figure out exactly which
+	// container require what and make
+	// this more specific. charon pod
+	// needs to run as root to load
+	// plugins 
+	privEsc := false
 	return &corev1.SecurityContext{
 		SeccompProfile: &corev1.SeccompProfile{
 			Type: corev1.SeccompProfileTypeRuntimeDefault,
 		},
+
+		AllowPrivilegeEscalation: &privEsc,
 		Capabilities: &corev1.Capabilities{
-			Add: []corev1.Capability{"NET_ADMIN"},
+			Drop: []corev1.Capability{"ALL"},
 		},
 	}
+}
+
+func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
+	def := r.createDefaultSecurityContext()
+	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN"}
+	return def
 }
 
 func (r *IpmanReconciler) SetupWithManager(mgr ctrl.Manager) error {
