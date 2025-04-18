@@ -28,7 +28,7 @@ deploy:
 		--key certs/server-key.pem                \
 		-n ims
 
-	kubectl apply -f ipman.yaml                   \
+	kubectl apply -f samples/ipman.yaml           \
 		-f config/controller_deployment.yaml
 
 .PHONY: clean
