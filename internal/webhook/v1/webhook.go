@@ -15,7 +15,6 @@ type WebhookHandler struct{
 }
 
 func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
-	println("Wutishapenin")
 	in, err := parseRequest(*r)
 	if err != nil {
 		println("Error parsing request: ", err)
@@ -35,7 +34,6 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	}
 	
 	w.Header().Add("Content-Type", "application/json")
-	println(string(respJson))
 	w.Write(respJson)
 }
 
@@ -60,7 +58,6 @@ func patch() []byte {
 	}
 ]`,cont))
 
-	println("patch: ", string(patch))
 	if err != nil {
 		println("Error marshalling json patch: ", err)
 	}
@@ -100,7 +97,6 @@ func parseRequest(r http.Request) (*admissionv1.AdmissionReview, error) {
 	}
 
 	var a admissionv1.AdmissionReview
-	println("body: ", string(body))
 	if err := json.Unmarshal(body, &a); err != nil {
 		return nil, fmt.Errorf("could not parse admission review request: %v", err)
 	}
