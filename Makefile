@@ -33,7 +33,7 @@ deploy:
 
 .PHONY: clean
 clean:
-	cd config && kubectl delete                   \
+	-cd config && kubectl delete                   \
 		-f service_account.yaml                   \
 		-f cluster_role.yaml                      \
 		-f cluster_role_binding.yaml              \
