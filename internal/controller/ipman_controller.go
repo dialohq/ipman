@@ -241,7 +241,7 @@ func (r *IpmanReconciler) createCharonDaemonContainer() corev1.Container {
 			{Name: CharonSocketVolume, MountPath: "/var/run/"},
 			{Name: CharonConfVolume, MountPath: "/etc/swanctl"},
 		},
-		SecurityContext: r.createNetAdminSecurityContext(),
+		SecurityContext: r.createCharonDaemonSecurityContext(),
 	}
 }
 
@@ -291,6 +291,13 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 			Drop: []corev1.Capability{"ALL"},
 		},
 	}
+}
+
+func (r *IpmanReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext{
+	def := r.createDefaultSecurityContext()
+	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"}
+	return def
+
 }
 
 func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
