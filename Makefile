@@ -14,7 +14,7 @@ push:
 
 .PHONY: deploy
 deploy:
-	cd config && kubectl apply                    \
+	-cd config && kubectl apply                   \
 		-f namespace.yaml                         \
 		-f service_account.yaml                   \
 		-f cluster_role.yaml                      \
@@ -22,7 +22,8 @@ deploy:
 		-f webhook_service.yaml                   \
 		-f ipman.yaml                             \
 		-f ipman-controller-service.yaml          \
-		-f mutating_webhook.yaml 
+		-f mutating_webhook.yaml                  \
+		-f network_policy.yaml
 
 	kubectl create secret tls webhook-server-cert \
 		--cert certs/server.pem                   \
