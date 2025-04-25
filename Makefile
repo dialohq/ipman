@@ -21,6 +21,7 @@ deploy:
 		-f cluster_role_binding.yaml              \
 		-f webhook_service.yaml                   \
 		-f ipman.yaml                             \
+		-f ipman-controller-service.yaml          \
 		-f mutating_webhook.yaml 
 
 	kubectl create secret tls webhook-server-cert \
@@ -40,6 +41,7 @@ clean:
 		-f webhook_service.yaml                   \
 		-f ipman.yaml                             \
 		-f mutating_webhook.yaml                  \
+		-f ipman-controller-service.yaml          \
 		-f namespace.yaml                         
 
 	-kubectl delete secret webhook-server-cert
