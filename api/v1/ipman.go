@@ -2,7 +2,6 @@ package v1
 
 import (
 	"fmt"
-	"reflect"
 	"sort"
 
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,7 +18,6 @@ type Child struct {
 	Name      string            `json:"name"`
 	LocalTs   string            `json:"localTs"`
 	RemoteTs  string            `json:"remoteTs"`
-	PodNameIp map[string]string `json:"podNameIpMap"`
 }
 
 func (c *Child) SerializeToConf(if_id int) string {
@@ -41,6 +39,7 @@ func (c *Child) SerializeToConf(if_id int) string {
 type IpmanSpec struct {
 	Name       string    `json:"name"`
 	RemoteAddr string    `json:"remoteAddr"`
+	LocalAddr  string    `json:"localAddr"`
 	LocalId    string    `json:"localId"`
 	RemoteId   string    `json:"remoteId"`
 	SecretRef  SecretRef `json:"secretRef"`
@@ -57,6 +56,7 @@ func (v *IpmanSpec) SerializeToConf(if_id int, secret string) string {
 connections {
 	%s {
 		remote_addrs = %s
+		local_addrs = %s
 		local {
 			auth = psk
 			id = %s
@@ -79,7 +79,7 @@ secrets {
 		remote-id = %s
 	}
 }
-		`, v.Name, v.RemoteAddr, v.LocalId, v.RemoteId, serializedChildren, v.Name, secret, v.LocalId, v.RemoteId)
+		`, v.Name, v.RemoteAddr,v.LocalAddr, v.LocalId, v.RemoteId, serializedChildren, v.Name, secret, v.LocalId, v.RemoteId)
 	return conf
 }
 
@@ -123,9 +123,6 @@ func childrenEqual(a, b []Child) bool {
 			return false
 		}
 		if a[i].RemoteTs != b[i].RemoteTs {
-			return false
-		}
-		if !reflect.DeepEqual(a[i].PodNameIp, b[i].PodNameIp) {
 			return false
 		}
 	}

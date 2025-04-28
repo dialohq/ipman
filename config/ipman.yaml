@@ -43,16 +43,11 @@ spec:
                       type: string
                     name:
                       type: string
-                    podNameIpMap:
-                      additionalProperties:
-                        type: string
-                      type: object
                     remoteTs:
                       type: string
                   required:
                   - localTs
                   - name
-                  - podNameIpMap
                   - remoteTs
                   type: object
                 type: array
@@ -63,6 +58,8 @@ spec:
               nodeName:
                 type: string
               remoteAddr:
+                type: string
+              localAddr:
                 type: string
               remoteId:
                 type: string
@@ -85,6 +82,7 @@ spec:
             - name
             - nodeName
             - remoteAddr
+            - localAddr
             - remoteId
             - secretRef
             type: object

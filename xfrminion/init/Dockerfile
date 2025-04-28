@@ -1,4 +1,4 @@
-FROM golang:1.23.7 AS builder
+FROM golang:1.24.1 AS builder
 
 WORKDIR /workspace
 COPY go.mod go.mod
@@ -6,7 +6,7 @@ RUN go mod download
 
 COPY main.go main.go
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o restctl main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o xfrminion main.go
 
 FROM nixos/nix:2.15.0
 # TODO: for prod, build on linux/amd64 to avoid this issue
@@ -17,13 +17,12 @@ FROM nixos/nix:2.15.0
 RUN mkdir -p /etc/nix && echo "filter-syscalls = false" > /etc/nix/nix.conf
 
 
-RUN nix-env -iA \
-    nixpkgs.strongswan \
+RUN nix-env -iA  \
     nixpkgs.bash \
-    nixpkgs.gawk \
+    nixpkgs.toybox \
     nixpkgs.iproute2
 
-COPY --from=builder /workspace/restctl /usr/local/bin/restctl
+COPY --from=builder /workspace/xfrminion /usr/local/bin/xfrminion
 
-ENTRYPOINT ["/usr/local/bin/restctl"]
+ENTRYPOINT ["/usr/local/bin/xfrminion"]
 

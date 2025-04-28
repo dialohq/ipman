@@ -29,6 +29,7 @@ var (
 	CharonSocketVolume   = "charon-volume"
 	CharonConfVolume     = "charon-conf"
 	CharonContainerImage = "plan9better/strongswan-charon:0.0.1"
+	XfrmPodName          = "xfrm-pod"
 )
 
 type IpmanReconciler struct {
@@ -108,9 +109,9 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	}
 
 	if charonPod.Status.PodIP == "" {
-		logger.Info("charon pod IP not yet allocated, trying again in 30s")
+		logger.Info("charon pod IP not yet allocated, trying again in 10s")
 
-		return ctrl.Result{RequeueAfter: time.Duration(time.Second * 30)}, nil
+		return ctrl.Result{RequeueAfter: time.Duration(time.Second * 10)}, nil
 	}
 	logger.Info("Charon pod has an ip", "ip", charonPod.Status.PodIP)
 
@@ -122,7 +123,91 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	}
 	logger.Info("Charon pod is alive and well")
 
+	xfrmPod, err := r.ensureXfrmPod(ctx, req)
+	if err != nil {
+		logger.Error(err, "error creating xfrmpod")
+	}
+	logger.Info("xfrm pod created", "pod", xfrmPod)
+
 	return ctrl.Result{}, nil
+
+}
+
+func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, req reconcile.Request) (*corev1.Pod, error){
+	logger := log.FromContext(ctx)
+
+	var xfrmPod corev1.Pod
+	nsn := types.NamespacedName{
+		Name:      XfrmPodName,
+		Namespace: "ims",
+	}
+
+	err := r.Get(ctx, nsn, &xfrmPod)
+	if apierrors.IsNotFound(err) {
+		logger.Info("xfrm pod not found, creating", "podName", XfrmPodName)
+
+		xfrmPod := r.createXfrmPod(req)
+		if err := r.Create(ctx, xfrmPod); err != nil {
+			logger.Error(err, "Failed to create xfrm pod")
+			return nil, err
+		}
+
+		logger.Info("Successfully created xfrm pod", "podName", XfrmPodName, "ip", xfrmPod.Status.PodIP)
+	} else if err != nil {
+		logger.Error(err, "Error checking xfrm pod existence")
+		return nil, err
+	}
+
+	return &xfrmPod, nil
+
+}
+
+func (r *IpmanReconciler)createXfrmPod(req reconcile.Request) *corev1.Pod{
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      XfrmPodName,
+			Namespace: "ims",
+		},
+		Spec: corev1.PodSpec{
+			HostPID: true,
+			SecurityContext: &corev1.PodSecurityContext{
+				Sysctls: []corev1.Sysctl{
+					{
+						Name: "net.ipv4.ip_forward",
+						Value: "1",
+					},
+					{
+						Name: "net.ipv4.conf.all.rp_filter",
+						Value: "0",
+					},
+					{
+						Name: "net.ipv4.conf.default.rp_filter",
+						Value: "0",
+					},
+					{
+						Name: "net.ipv4.conf.all.arp_filter",
+						Value: "1",
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name: "xfrm-container", 
+					Image: "plan9better/xfrminion-long:latest",
+					ImagePullPolicy: corev1.PullAlways,
+					SecurityContext: r.createNetAdminSecurityContext(), // TODO: delete after testing
+				},
+			},
+			InitContainers: []corev1.Container{
+				{
+					Name: "iface-request",
+					Image: "plan9better/xfrminion:latest",
+					ImagePullPolicy: corev1.PullAlways,
+					SecurityContext: r.createNetAdminSecurityContext(),
+				},
+			},
+		},
+	}
 
 }
 
@@ -215,6 +300,9 @@ func (r *IpmanReconciler) createCharonPod(req ctrl.Request, secret *corev1.Secre
 			Name:      CharonPodName,
 			// TODO: handle namespace well
 			Namespace: "ims",
+			Labels: map[string]string{
+				"ipserviced": "true", // to get picked up by the service
+			},
 		},
 		Spec: corev1.PodSpec{
 			Volumes: []corev1.Volume{
@@ -222,6 +310,7 @@ func (r *IpmanReconciler) createCharonPod(req ctrl.Request, secret *corev1.Secre
 				{Name: CharonConfVolume},
 			},
 			HostNetwork: true,
+			HostPID: true,
 			Containers: []corev1.Container{
 				r.createCharonDaemonContainer(),
 				r.createRestCtlContainer(),
@@ -235,6 +324,7 @@ func (r *IpmanReconciler) createCharonPod(req ctrl.Request, secret *corev1.Secre
 
 func (r *IpmanReconciler) createCharonDaemonContainer() corev1.Container {
 	return corev1.Container{
+		ImagePullPolicy: corev1.PullAlways,
 		Name:  "charondaemon",
 		Image: CharonContainerImage,
 		VolumeMounts: []corev1.VolumeMount{
@@ -247,6 +337,7 @@ func (r *IpmanReconciler) createCharonDaemonContainer() corev1.Container {
 
 func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 	return corev1.Container{
+		ImagePullPolicy: corev1.PullAlways,
 		Name:  "restctl",
 		Image: "plan9better/restctl",
 		VolumeMounts: []corev1.VolumeMount{
@@ -259,6 +350,7 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 
 func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret) corev1.Container {
 	return corev1.Container{
+		ImagePullPolicy: corev1.PullAlways,
 		Name:  "create-conf",
 		Image: "busybox:latest",
 		Command: []string{
@@ -273,7 +365,7 @@ func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret) corev1.
 	}
 }
 
-// rke2 requires seccopm profile set to runtime default or localhost
+// rke2 requires seccomp profile set to runtime default or localhost
 func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
 	//TODO: figure out exactly which
 	// container require what and make
@@ -288,6 +380,7 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 
 		AllowPrivilegeEscalation: &privEsc,
 		Capabilities: &corev1.Capabilities{
+			// TODO: add this back
 			Drop: []corev1.Capability{"ALL"},
 		},
 	}

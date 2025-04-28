@@ -38,7 +38,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	logger.Info("new controller")
+	logger.Info("Creating controller")
 	if err = (&cont.IpmanReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
@@ -52,13 +52,6 @@ func main() {
 		Port: 8443,
 		CertDir: "/etc/webhook/certs",
 	})
-
-    dat, err := os.ReadFile("/etc/webhook/certs/")
-    if err != nil {
-    	logger.Error(err, "Error opening file")
-    }
-    logger.Info("reading file: ", "file", string(dat))
-
 
 	if err = mgr.Add(whServer); err != nil{
 		logger.Error(err, "Error registering wh server with the manager")

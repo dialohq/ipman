@@ -20,11 +20,19 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 		println("Error parsing request: ", err)
 	}
 
-	var pod corev1.Pod
-	err = json.Unmarshal(in.Request.Object.Raw, &pod)
-	if err != nil {
-		println("Error unmarshaling ")
+	// TODO: check for init containers before overriding
+	if(in.Request.Kind.Kind != "Pod"){
+		w.Header().Add("Content-Type", "application/json")
+		r := noPatchResponse(in)
+		rjson, err := json.Marshal(r)
+		if err != nil {
+			fmt.Println("Error marshalling response for no patch: ", err)
+			return
+		}
+		w.Write(rjson)
+		return 
 	}
+
 	patch := patch()
 	resp := response(patch, in)
 
@@ -39,9 +47,10 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 
 func initContainer() *corev1.Container{
 	return &corev1.Container{
-		Name: "some-init-container",
-		Image: "ubuntu:latest",
-		Command: []string{"bash", "-c", "while true; do sleep 10000; done"},
+		Name: "iface-request",
+		Image: "plan9better/vxlandlord:latest",
+		ImagePullPolicy: corev1.PullAlways,
+		SecurityContext: createNetAdminSecurityContext(),
 	}
 }
 
@@ -65,6 +74,20 @@ func patch() []byte {
 	return patch
 }
 
+func noPatchResponse(in *admissionv1.AdmissionReview) *admissionv1.AdmissionReview{
+	return &admissionv1.AdmissionReview{
+		TypeMeta: metav1.TypeMeta{
+			Kind:       "AdmissionReview",
+			APIVersion: "admission.k8s.io/v1",
+		},
+		Response: &admissionv1.AdmissionResponse{
+			UID: in.Request.UID,
+			Allowed: true,
+		},
+	}
+
+}
+
 func response(patch []byte,in *admissionv1.AdmissionReview) *admissionv1.AdmissionReview{
 	pt := admissionv1.PatchTypeJSONPatch
 	return &admissionv1.AdmissionReview{
@@ -80,6 +103,22 @@ func response(patch []byte,in *admissionv1.AdmissionReview) *admissionv1.Admissi
 		},
 	}
 }
+
+// TODO: this is more or less duplicated in ipman_controller.go
+func createNetAdminSecurityContext() *corev1.SecurityContext {
+	privEsc := false
+	return &corev1.SecurityContext{
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+
+		AllowPrivilegeEscalation: &privEsc,
+		Capabilities: &corev1.Capabilities{
+			Add: []corev1.Capability{"NET_ADMIN"},
+		},
+	}
+}
+
 
 // https://github.com/slackhq/simple-kubernetes-webhook/blob/main/main.go
 func parseRequest(r http.Request) (*admissionv1.AdmissionReview, error) {
