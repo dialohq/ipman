@@ -4,19 +4,17 @@ metadata:
   name: sodies-nix
   namespace: default
 spec:
-  name: "3s"
-  remoteAddr: "13.60.220.237"
-  localId: "145.239.135.194"
-  remoteId: "13.60.220.237"
+  name: "connection-name"
+  remoteAddr: "xxx.xxx.xxx.xxx/xx"
+  localAddr: "xxx.xxx.xxx.xxx/xx"
+  localId: "xxx.xxx.xxx.xxx/xx"
+  remoteId: "xxx.xxx.xxx.xxx/xx"
   secretRef:
     name: "ipsec-secret"
     namespace: "default"
     key: "psk"
   children:
-    - name: "3s"
+    - name: "child-name"
       localTs: "10.0.2.0/24"
       remoteTs: "10.0.1.0/24"
-      podNameIpMap:
-        pod1: "10.0.2.1"
-        pod2: "10.0.2.2"
   nodeName: "node-01"
