@@ -17,15 +17,19 @@ import (
 )
 
 func findDefaultInterface() (*ip.Link, error) {
+	fmt.Println("Finding default interface")
 	_, dflt, err := net.ParseCIDR("0.0.0.0/0")
 	if err != nil {
 		return nil, fmt.Errorf("Error parsing CIDR: %s", err.Error())
 	}
 	links, err := ip.LinkList()
+	fmt.Println("listing links")
 	if err != nil {
 		return nil, fmt.Errorf("Error listing links: %s", err.Error())
 	}
+	fmt.Println("looping")
 	for _, l := range links {
+		fmt.Println("link: ", l.Attrs().Name)
 		routes, err := ip.RouteList(l, ip.FAMILY_V4)
 		if err != nil {
 			return nil, fmt.Errorf("Error listing routes for device %s: %s", l.Attrs().Name, err.Error())
@@ -33,12 +37,15 @@ func findDefaultInterface() (*ip.Link, error) {
 		if len(routes) == 0 {
 			continue
 		}
+		fmt.Println("looping through routes")
 		for _, r := range routes {
 			if r.Dst.String() == dflt.String() {
+				fmt.Println("returinng")
 				return &l, nil
 			}
 		}
 	}
+	fmt.Println("returinng")
 	return nil, fmt.Errorf("Default route not found")
 }
 
@@ -74,9 +81,11 @@ func ipToByteArray(ip string) []byte {
 	octet_bytes := []byte{}
 	for _, o := range octets {
 
-		i, err := strconv.ParseInt(o, 10, 8)
+		i, err := strconv.ParseUint(o, 10, 8)
 		if err != nil {
-			fmt.Println("Malformed vxlan ip address")
+			fmt.Println("o", o)
+			fmt.Println("Malformed vxlan ip address", err)
+			return nil
 		}
 		octet_bytes = append(octet_bytes, byte(i))
 	}
@@ -84,7 +93,8 @@ func ipToByteArray(ip string) []byte {
 }
 
 type payload struct {
-	MyIP string `json:"vxlan_pod_ip"`
+	MyIP      string `json:"vxlan_pod_ip"`
+	ChildName string `json:"child_name"`
 }
 
 // Every error is fatal since we want the
@@ -99,11 +109,11 @@ func fatal(err error, message string) {
 // TODO: modularize this better
 // this is duplicated in restctl-container
 type vxlanInfo struct {
-	If_id      int    `json:"vxlan_id,omitempty"`
-	Vxlan_ip   string `json:"vxlan_ip,omitempty"`
-	Gateway_ip string `json:"gateway_ip,omitempty"`
-	Remote_ts  string `json:"remote_ts,omitempty"`
-	Wait       int    `json:"wait"`
+	If_id     int    `json:"vxlan_id,omitempty"`
+	Remote_ts string `json:"remote_ts,omitempty"`
+	Xfrm_if_ip string `json:"xfrm_if_ip"`
+	Xfrm_underlying_ip string `json:"xfrm_underlying_ip"`
+	Wait      int    `json:"wait"`
 }
 
 func main() {
@@ -111,17 +121,29 @@ func main() {
 	iface, err := findDefaultInterface()
 	fatal(err, "Error finding default interface")
 
+	fmt.Println("addrs")
 	addrs, err := ip.AddrList(*iface, ip.FAMILY_V4)
+	fatal(err, "Error listing addresses")
+	fmt.Println("addrs: ", addrs)
 	default_ip := addrs[0].IP
-	fmt.Printf("IP identified as %s from interface %s", default_ip, (*iface).Attrs().Name)
+	fmt.Println("Default ip: ", default_ip)
+	fmt.Println("iface: ", iface, (*iface), (*iface).Attrs())
+	fmt.Println("IP identified as", default_ip, "from interface ", (*iface).Attrs().Name)
 	fatal(err, fmt.Sprintf("Error reading list of addresses of interface %s", (*iface).Attrs().Name))
 
 	// ask charon-pod restctl api for data
-	p, err := json.Marshal(&payload{MyIP: default_ip.String()})
+	vxlanip := os.Getenv("VXLAN_IP")
+	childName := os.Getenv("CHILD_NAME")
+	xfrm_gateway := os.Getenv("XFRM_GATEWAY")
+	fmt.Println("env vars: ", xfrm_gateway, vxlanip, childName)
+	p, err := json.Marshal(&payload{MyIP: default_ip.String(), ChildName: childName})
+	fatal(err, "Error marshaling reqeust to charon-pod")
+	fmt.Println("marshaled: ", string(p))
 	req, err := http.NewRequest("POST", "http://ipman-controller-service.ims.svc/vxlan", bytes.NewBuffer(p))
 	fatal(err, "Error preparing reqeust to charon-pod")
 
 	req.Header.Add("Content-Type", "application/json")
+	fmt.Println("added header")
 	client := &http.Client{}
 	var vi vxlanInfo
 	done := false
@@ -135,16 +157,13 @@ func main() {
 		if vi.Wait == 0 {
 			done = true
 		} else {
+			fmt.Println("Waiting")
 			time.Sleep(time.Duration(vi.Wait * int(time.Second)))
 		}
 
 	}
 
-	ipa, subnet, _ := strings.Cut(vi.Vxlan_ip, "/")
-	octets := strings.Split(ipa, ".")
-	first_octets := strings.Join(octets[0:3], ".")
-	xfrm_gateway_ip := first_octets + ".1"
-
+	ipa, subnet, _ := strings.Cut(vxlanip, "/")
 	sn_int, err := strconv.ParseInt(subnet, 10, 6)
 	fatal(err, "Error parsing subnet")
 
@@ -158,12 +177,14 @@ func main() {
 	fmt.Println("vxlan_ipnet: ", vxlan_ipnet, vxlan_ipnet.IP)
 	fatal(err, "Couldn't parse CIDR to net.IPNet")
 
-	ob = ipToByteArray(xfrm_gateway_ip)
+	xip, _, _ :=  strings.Cut(vi.Xfrm_if_ip, "/")
+	fmt.Println("xip: ", xip) // TODO: delete
+	ob = ipToByteArray(xip)
 	xfrm_ipnet := net.IPNet{
 		IP:   net.IPv4(ob[0], ob[1], ob[2], ob[3]),
 		Mask: net.CIDRMask(int(sn_int), 32),
 	}
-	fatal(err, fmt.Sprintf("Error parsing CIDR xfrm_gateway_ip %s", xfrm_gateway_ip))
+	fatal(err, fmt.Sprintf("Error parsing CIDR xfrm_gateway_ip %s", xfrm_gateway))
 
 	vxlan, err := createVxlan(iface, addrs[0].IP, vi.If_id)
 	fatal(err, "Error creating vxlan interface")
@@ -172,20 +193,31 @@ func main() {
 	fatal(err, "Error settings vxlan interface up")
 
 	ip.AddrAdd(*vxlan, &ip.Addr{IPNet: &vxlan_ipnet})
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("bridge fdb append 00:00:00:00:00:00 dev %s dst %s", "vxlan"+strconv.FormatInt(int64(vi.If_id), 10), vi.Gateway_ip))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("bridge fdb append 00:00:00:00:00:00 dev %s dst %s", "vxlan"+strconv.FormatInt(int64(vi.If_id), 10), vi.Xfrm_underlying_ip))
 	out, err := cmd.Output()
 	if err != nil || string(out) != "" {
 		fmt.Println("Error appending to bridge fdb: ", err)
 		os.Exit(1)
 	}
 
+	fmt.Println("rmeote ts: ", vi.Remote_ts)
 	_, remoteipnet, err := net.ParseCIDR(vi.Remote_ts)
+	fmt.Println("rmeote ipnet: ", remoteipnet)
 	r := &ip.Route{
 		LinkIndex: (*vxlan).Attrs().Index,
 		Dst:       remoteipnet,
 		Src:       vxlan_ipnet.IP,
 		Gw:        xfrm_ipnet.IP,
 	}
+	fmt.Println("r: ", r)
 	err = ip.RouteAdd(r)
-	fatal(err, "Error adding route")
+	if err != nil {
+		fmt.Println("Error adding route: ", err)
+		cmd := exec.Command("bash", "-c", "while true; do sleep 1000; done;")
+		out, err := cmd.Output()
+		if err != nil {
+			fmt.Println("Error executing command sleep: ", err)
+		}
+		fmt.Println("Out? lmao: ", string(out))
+	}
 }

@@ -59,7 +59,9 @@ func main() {
 	}
 	
 
-	whh := ipmanwhv1.WebhookHandler{}
+	whh := ipmanwhv1.WebhookHandler{
+		Client: mgr.GetClient(),
+	}
 	whServer.Register("/mutating", &whh)
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {

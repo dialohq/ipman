@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -14,6 +15,7 @@ import (
 // TODO: put in env variable or something
 var (
 	SWAN_CONF_PATH = "/etc/swanctl/swanctl.conf"
+	CHARON_CONN = "/etc/charon-conn/"
 )
 
 type WrongArgumentsError struct{}
@@ -107,7 +109,7 @@ func p0ng(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("p0ng"))
 }
 
-var xfrm_gateway_ip *string = nil
+var xfrm_cilium_ip *string = nil
 
 type xfrmInfo struct {
 	If_id     int64  `json:"if_id"`
@@ -130,30 +132,64 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 	var resp CommandResponse
 
 	// TODO: dynamically from CR
-	xi := xfrmInfo{
-		If_id:     101,
-		Remote_ts: "10.0.1.0/24",
-		Local_ts:  "10.0.2.0/24",
-	}
+	// xi := xfrmInfo{
+	// 	If_id:     101,
+	// 	Remote_ts: "10.0.1.0/24",
+	// 	Local_ts:  "10.0.2.0/24",
+	// 	Xfrm_ip: "10.0.2.1/24",
+	// 	Vxlan_ip: "10.0.2.2/24",
+	// }
 
 	w.Header().Set("Content-Type", "application/json")
 	// TODO: use int for if_id
 	var pid *string
 	var ip *string
+	var child *string
 	if len(splitPath) == 1 {
 		pid = nil
 		ip = nil
+		child = nil
 		resp.Error = fmt.Errorf("Not enough arguments error").Error()
 		json.NewEncoder(w).Encode(resp)
 		return
 	}
 	pid = &r.Form["pid"][0]
 	ip = &r.Form["ip"][0]
+	child = &r.Form["child"][0]
+
 	fmt.Println("PID: ", pid)
 	fmt.Println("IP: ", ip)
-	xfrm_gateway_ip = ip
+	fmt.Println("CHILD: ", child)
+	xfrm_cilium_ip = ip
 
-	if_id := strconv.FormatInt(xi.If_id, 10)
+	cm, err := os.ReadFile(CHARON_CONN + *child)
+	if err != nil {
+		fmt.Println("Couldn't read file at " + CHARON_CONN + *child)
+		writeResponseWait(w, 10)
+		return
+	}
+	fmt.Println("cm: ", string(cm))
+
+	conf := &Child{}
+	err = json.Unmarshal(cm, conf)
+	if err != nil {
+		fmt.Println("Couldn't unmarshal data from file into child struct")
+		writeResponseWait(w, 10)
+		return
+	}
+	fmt.Println("child: ", conf)
+
+	xi := xfrmInfo{
+		If_id: int64(conf.If_id),
+		Remote_ts: conf.RemoteTs,
+		Local_ts: conf.LocalTs,
+		Xfrm_ip: conf.Xfrm_if_ip,
+		Vxlan_ip: conf.Vxlan_if_ip,
+
+	}
+	fmt.Println("xi: ", xi)
+
+	if_id := strconv.FormatInt(int64(conf.If_id), 10)
 	cmd := exec.Command("bash", "-c", fmt.Sprintf("ip link add xfrm%s type xfrm if_id %s dev ens3", if_id, if_id))
 	output, err := cmd.CombinedOutput()
 	fmt.Println(string(output))
@@ -180,35 +216,33 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 
 type vxlanInfo struct {
 	If_id      int    `json:"vxlan_id,omitempty"`
-	Vxlan_ip   string `json:"vxlan_ip,omitempty"`
-	Gateway_ip string `json:"gateway_ip,omitempty"`
 	Remote_ts  string `json:"remote_ts,omitempty"`
+	Xfrm_if_ip string `json:"xfrm_if_ip"`
+	Xfrm_underlying_ip string `json:"xfrm_underlying_ip"`
 	Wait       int    `json:"wait"` // tells the pod that something is not ready and it should wait n seconds
 }
 
 type vxlanData struct {
 	Vxlan_default_ip string `json:"vxlan_pod_ip"`
+	Child_name string `json:"child_name"`
+}
+
+func writeResponseWait(w http.ResponseWriter, t int){
+		vi := vxlanInfo{
+			Wait: t,
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(vi)
+	
 }
 
 func createVxlan(w http.ResponseWriter, r *http.Request) {
 	// TODO: exponential backoff??
 	var vi vxlanInfo
-	if xfrm_gateway_ip == nil {
-		vi = vxlanInfo{
-			Wait: 10,
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(vi)
-	} else {
-		// TODO: dynamically from CR
-		vi = vxlanInfo{
-			If_id:      101,
-			Vxlan_ip:   "10.0.2.3/24",
-			Remote_ts:  "10.0.1.0/24",
-			Gateway_ip: *xfrm_gateway_ip,
-			Wait:       0,
-		}
-	}
+	if xfrm_cilium_ip == nil {
+		writeResponseWait(w, 10)
+		return
+	} 
 
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -224,9 +258,41 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 	err = json.Unmarshal(out, &vd)
 	if err != nil {
 		fmt.Println("Couldn't unmarshall body of request for vxlan interface", err)
+		writeResponseWait(w, 10)
+		return
 	}
-	http.Get(fmt.Sprintf("http://%s:8080/add?ip=%s", *xfrm_gateway_ip, vd.Vxlan_default_ip))
+	cm, err := os.ReadFile(CHARON_CONN + vd.Child_name)
+	if err != nil {
+		fmt.Println("Couldn't read file at " + CHARON_CONN + vd.Child_name)
+		writeResponseWait(w, 10)
+		return
+	}
+
+	conf := &Child{}
+	err = json.Unmarshal(cm, conf)
+	if err != nil {
+		fmt.Println("Couldn't unmarshal data from file intro child struct")
+		writeResponseWait(w, 10)
+		return
+	}
+
+	vi.If_id = conf.If_id
+	vi.Remote_ts = conf.RemoteTs
+	vi.Xfrm_if_ip = conf.Xfrm_if_ip
+	vi.Xfrm_underlying_ip = *xfrm_cilium_ip
+	vi.Wait = 0
+	http.Get(fmt.Sprintf("http://%s:8080/add?ip=%s", *xfrm_cilium_ip, vd.Vxlan_default_ip))
 	json.NewEncoder(w).Encode(vi)
+}
+
+type Child struct {
+	Name      string             `json:"name"`
+	LocalTs   string             `json:"localTs"`
+	RemoteTs  string             `json:"remoteTs"`
+	If_id       int              `json:"if_id"`
+	Ip_pool     []string         `json:"ip_pool"`
+	Xfrm_if_ip  string           `json:"xfrmIfIp"`
+	Vxlan_if_ip string           `json:"vxlanIfIp"`
 }
 
 func main() {

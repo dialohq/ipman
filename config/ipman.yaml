@@ -41,14 +41,26 @@ spec:
                   properties:
                     localTs:
                       type: string
+                    xfrmIfIp:
+                      type: string
+                    vxlanIfIp:
+                      type: string
                     name:
                       type: string
                     remoteTs:
                       type: string
+                    if_id:
+                      type: integer
+                    ip_pool:
+                      type: array
+                      items:
+                        type: string
                   required:
                   - localTs
                   - name
                   - remoteTs
+                  - if_id
+                  - ip_pool
                   type: object
                 type: array
               localId:
@@ -88,6 +100,16 @@ spec:
             type: object
           status:
             type: object
+            properties:
+              xfrmGatewayIp:
+                type: string
+              freeIPs:
+                type: object
+                description: A map of child name to list of free ips
+                additionalProperties:
+                  type: array
+                  items:
+                    type: string
         type: object
     served: true
     storage: true

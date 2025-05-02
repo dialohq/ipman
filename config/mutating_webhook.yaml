@@ -4,6 +4,7 @@ metadata:
   name: ipman-webhook
 webhooks:
 - name: webhook.ipman.dialo.ai
+  failurePolicy: Fail
   admissionReviewVersions: ["v1"]
   sideEffects: None
   clientConfig:
@@ -14,12 +15,20 @@ webhooks:
       name: ipman-webhook-service
       path: /mutating
       port:  443
-  objectSelector:
-    matchLabels:
-      name: somepod
+  # this is here to prevent a deadlock
+  # since the webhook server is itself
+  # a pod, without it it would try to
+  # call itself on creation.
+  namespaceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values:
+          - ims
+          
+  objectSelector: {}
   rules:
   - operations: ["CREATE"]
-    apiGroups: ["*"]
-    apiVersions: ["*"]
-    resources: ["*"]
-    scope: "*"
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]

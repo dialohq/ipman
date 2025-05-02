@@ -2,9 +2,12 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -35,8 +38,6 @@ var (
 type IpmanReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
-
-	Config *ipmanv1.Ipman
 }
 
 var annotationPredicate = predicate.Funcs{
@@ -55,55 +56,85 @@ var annotationPredicate = predicate.Funcs{
 }
 
 func hasIpmanAnnotation(o client.Object) bool {
-	_, ok := o.GetAnnotations()["Ipmanaged"]
+	_, ok := o.GetAnnotations()["ipman.dialo.ai/childName"]
 	return ok
 }
 
-func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx)
-	logger.Info("Starting reconciler", "object", req.Name)
 
-	// TODO: branch of execution
-	// when there is no config
-	// and someone creates a pod
-	if r.Config == nil {
-		config, err := r.getIpmanConfig(ctx, req)
-		if err != nil {
-			logger.Error(err, "Failed to get ipman config, retrying in 10s")
-			return ctrl.Result{RequeueAfter: time.Duration(10 * 10 * time.Second)}, nil
-		}
-		r.Config = config
-	}
-
-	// check if config is changed
-	nsn := types.NamespacedName{
-		Namespace: r.Config.Namespace,
-		Name:      r.Config.Name,
-	}
-	cfg := &ipmanv1.Ipman{}
-	err := r.Get(ctx, nsn, cfg)
+func (r *IpmanReconciler) isReconcilingKindIpman(ctx context.Context, req reconcile.Request) (bool, error){
+	im := &ipmanv1.Ipman{}
+	err := r.Get(ctx, req.NamespacedName, im) 
 	if err != nil {
-		logger.Error(err, "Error fetching Ipman to compare with last known version")
-		return ctrl.Result{}, err
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
 	}
-	logger.Info("Fetched ipman instance", "cfg", cfg)
+	return true, nil
+} 
 
-	if !r.Config.Spec.DeepEqual(cfg.Spec) {
-		logger.Info("Newer config found, replacing and requeuing")
-		r.Config = cfg
-		// TODO: handle changes
-		return ctrl.Result{Requeue: true}, nil
+func (r *IpmanReconciler) createIpmanFreeIps(ipman *ipmanv1.Ipman, ctx context.Context) (map[string][]string, error){
+	logger := log.FromContext(ctx)
+	
+	childNames := []string{}
+
+	status := map[string][]string{}
+	for _, child := range ipman.Spec.Children {
+		status[child.Name] = slices.Clone(child.Ip_pool)
+		childNames = append(childNames, child.Name)
+	}
+
+	podlist := &corev1.PodList{}
+	err := r.List(ctx, podlist)
+	if err != nil {
+		logger.Error(err, "Error listing pods to check IPs")
+		return nil, err
+	}
+	if len(podlist.Items) == 0 {
+		return status, nil
+	}
+
+	podsWithAnnotation := []*corev1.Pod{}
+	for _, p := range podlist.Items {
+		if slices.Contains(childNames, p.Annotations["ipman.dialo.ai/childName"]) {
+			podsWithAnnotation = append(podsWithAnnotation, &p)
+		}
+	}
+	if len(podsWithAnnotation) == 0 {
+		return status, nil
+	}
+
+	for _, pod := range podsWithAnnotation {
+		childName := pod.Annotations["ipman.dialo.ai/childName"]
+		vxlanIp := pod.Annotations["ipman.dialo.ai/vxlan"] 
+		status[childName] = slices.DeleteFunc(status[childName], func(ip string)bool{
+			return ip == vxlanIp
+		})
+	}
+
+	return status, nil
+}
+
+func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+	logger.Info("Reconciling ipman")
+
+	ipman := &ipmanv1.Ipman{} 
+	if err := r.Get(ctx, req.NamespacedName, ipman); err != nil {
+		logger.Error(err, "Error getting ipman instance")
+		return ctrl.Result{}, err
 	}
 
 	// TODO: make it fail gracefully
 	// when there is a config with no
 	// secret 
-	secret, err := r.getSecret(ctx)
+	secret, err := r.getSecret(ctx, ipman)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("failed to get secret: %w in namespace %s", err, ctx)
+		logger.Error(err, "Error, couldn't get secret")
+		return ctrl.Result{RequeueAfter: time.Duration(time.Second * 15)}, err
 	}
 
-	charonPod, err := r.ensureCharonPod(ctx, req, secret)
+	charonPod, err := r.ensureCharonPod(ctx, secret, ipman)
 	if err != nil {
 		return ctrl.Result{}, fmt.Errorf("failed to ensure Charon pod: %w", err)
 	}
@@ -113,7 +144,6 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 
 		return ctrl.Result{RequeueAfter: time.Duration(time.Second * 10)}, nil
 	}
-	logger.Info("Charon pod has an ip", "ip", charonPod.Status.PodIP)
 
 	// individual child connections
 	charonPodAlive := charonPodHealthCheck(ctx, charonPod.Status.PodIP)
@@ -123,17 +153,75 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	}
 	logger.Info("Charon pod is alive and well")
 
-	xfrmPod, err := r.ensureXfrmPod(ctx, req)
-	if err != nil {
-		logger.Error(err, "error creating xfrmpod")
+	for _, c := range ipman.Spec.Children {
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c)
+		if err != nil {
+			logger.Error(err, "error creating xfrmpod")
+		}
+		logger.Info("xfrm pod exists", "pod", xfrmPod)
+
+		if xfrmPod.Status.HostIP == "" {
+			logger.Info("xfrm pod is not assigned an ip yet, trying again in 10s")
+			return ctrl.Result{RequeueAfter: time.Duration(time.Second * 10)}, nil
+		}
+
+		if ipman.Status.XfrmGatewayIP != xfrmPod.Status.HostIP{
+			ipman.Status.XfrmGatewayIP = xfrmPod.Status.HostIP
+			err = r.Status().Update(ctx, ipman)
+			if err != nil {
+				logger.Error(err, "Error changing status of ipman","ipman", ipman)
+				return ctrl.Result{RequeueAfter: time.Duration(10 * time.Second)}, nil
+			}
+		}
+		
 	}
-	logger.Info("xfrm pod created", "pod", xfrmPod)
 
 	return ctrl.Result{}, nil
-
 }
 
-func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, req reconcile.Request) (*corev1.Pod, error){
+func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	iml := &ipmanv1.IpmanList{}
+	err := r.List(ctx, iml)
+	if err != nil {
+		logger.Error(err, "Error listing ipmen")
+		return ctrl.Result{}, err
+	}
+
+	for _, im := range iml.Items {
+		ipman := &ipmanv1.Ipman{}
+		err := r.Get(ctx,types.NamespacedName{
+			Namespace: im.Namespace,
+			Name: im.Name,
+		} ,ipman)
+		freeIps, err := r.createIpmanFreeIps(ipman, ctx)
+		if err != nil {
+			logger.Error(err, "Error creating free ip list to change status")
+			return ctrl.Result{}, err
+		}
+		ipman.Status.FreeIPs = freeIps
+		err = r.Status().Update(ctx, ipman)
+		if err != nil {
+			logger.Error(err, "Couldn't update ipman status")
+			return ctrl.Result{}, err
+		}
+	}
+
+	isIpman, err := r.isReconcilingKindIpman(ctx, req)
+	if err != nil {
+		logger.Error(err, "Error checking kind of reconciled object")
+	}
+
+	if isIpman {
+		r, err := r.reconcileIpman(ctx, req)
+		return r, err
+	}
+
+	return ctrl.Result{}, nil
+}
+
+func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child) (*corev1.Pod, error){
 	logger := log.FromContext(ctx)
 
 	var xfrmPod corev1.Pod
@@ -146,7 +234,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, req reconcile.Reque
 	if apierrors.IsNotFound(err) {
 		logger.Info("xfrm pod not found, creating", "podName", XfrmPodName)
 
-		xfrmPod := r.createXfrmPod(req)
+		xfrmPod := r.createXfrmPod(c)
 		if err := r.Create(ctx, xfrmPod); err != nil {
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
@@ -162,7 +250,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, req reconcile.Reque
 
 }
 
-func (r *IpmanReconciler)createXfrmPod(req reconcile.Request) *corev1.Pod{
+func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child) *corev1.Pod{
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      XfrmPodName,
@@ -195,7 +283,13 @@ func (r *IpmanReconciler)createXfrmPod(req reconcile.Request) *corev1.Pod{
 					Name: "xfrm-container", 
 					Image: "plan9better/xfrminion-long:latest",
 					ImagePullPolicy: corev1.PullAlways,
-					SecurityContext: r.createNetAdminSecurityContext(), // TODO: delete after testing
+					SecurityContext: r.createNetAdminSecurityContext(),
+					Env: []corev1.EnvVar{
+						{
+							Name: "IF_ID",
+							Value: strconv.FormatInt(int64(c.If_id), 10),
+						},
+					},
 				},
 			},
 			InitContainers: []corev1.Container{
@@ -204,6 +298,12 @@ func (r *IpmanReconciler)createXfrmPod(req reconcile.Request) *corev1.Pod{
 					Image: "plan9better/xfrminion:latest",
 					ImagePullPolicy: corev1.PullAlways,
 					SecurityContext: r.createNetAdminSecurityContext(),
+					Env: []corev1.EnvVar{
+						{
+							Name: "CHILD_NAME",
+							Value: c.Name,
+						},
+					},
 				},
 			},
 		},
@@ -237,25 +337,13 @@ func charonPodHealthCheck(ctx context.Context, podIp string) bool {
 	return false
 }
 
-func (r *IpmanReconciler) getIpmanConfig(ctx context.Context, req ctrl.Request) (*ipmanv1.Ipman, error) {
-	logger := log.FromContext(ctx)
-	var config ipmanv1.Ipman
-
-	if err := r.Get(ctx, req.NamespacedName, &config); err != nil {
-		logger.Error(err, "Failed to get Ipman config")
-		return nil, err
-	}
-
-	return &config, nil
-}
-
-func (r *IpmanReconciler) getSecret(ctx context.Context) (*corev1.Secret, error) {
+func (r *IpmanReconciler) getSecret(ctx context.Context, ipman *ipmanv1.Ipman) (*corev1.Secret, error) {
 	logger := log.FromContext(ctx)
 	var secret corev1.Secret
 
 	nsn := types.NamespacedName{
-		Name:      r.Config.Spec.SecretRef.Name,
-		Namespace: r.Config.Spec.SecretRef.Namespace,
+		Name:      ipman.Spec.SecretRef.Name,
+		Namespace: ipman.Spec.SecretRef.Namespace,
 	}
 
 	if err := r.Get(ctx, nsn, &secret); err != nil {
@@ -266,20 +354,57 @@ func (r *IpmanReconciler) getSecret(ctx context.Context) (*corev1.Secret, error)
 	return &secret, nil
 }
 
-func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, req ctrl.Request, secret *corev1.Secret) (*corev1.Pod, error) {
+func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Secret, ipman *ipmanv1.Ipman) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
+	nsn := types.NamespacedName {
+		Name: fmt.Sprintf("%s-configmap", ipman.Name),
+		Namespace: "ims",
+	}
+	cm := &corev1.ConfigMap{}
+	err := r.Get(ctx, nsn, cm)
+	if err != nil {
+		if client.IgnoreNotFound(err) != nil{
+			logger.Error(err, "Could't fetch config map", "configmap", fmt.Sprintf("%s-configmap", ipman.Name))
+			return nil, err
+		}
+
+		logger.Info("config map not found, creating")
+		d := map[string]string{}
+		for _, c := range ipman.Spec.Children {
+			b, err := json.Marshal(c) 
+			if err != nil {
+				logger.Error(err, "Error marshalling child", "child", c)
+				return nil, err
+			}
+			d[c.Name] = string(b)
+		}
+		cm = &corev1.ConfigMap{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nsn.Name,
+				Namespace: nsn.Namespace,
+			},
+			Data: d,
+		}
+		err = r.Create(ctx, cm)
+		if err != nil {
+			logger.Error(err, "Error creating config map", "configmap", *cm)
+			return nil, err
+		}
+		logger.Info("config map created")
+	}
+	// TODO: if found, update
 
 	var charonPod corev1.Pod
-	nsn := types.NamespacedName{
+	nsn = types.NamespacedName{
 		Name:      CharonPodName,
 		Namespace: "ims",
 	}
 
-	err := r.Get(ctx, nsn, &charonPod)
+	err = r.Get(ctx, nsn, &charonPod)
 	if apierrors.IsNotFound(err) {
 		logger.Info("Charon pod not found, creating", "podName", CharonPodName)
 
-		charonPod := r.createCharonPod(req, secret)
+		charonPod := r.createCharonPod(secret, ipman, cm)
 		if err := r.Create(ctx, charonPod); err != nil {
 			logger.Error(err, "Failed to create Charon pod")
 			return nil, err
@@ -294,11 +419,17 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, req ctrl.Request,
 	return &charonPod, nil
 }
 
-func (r *IpmanReconciler) createCharonPod(req ctrl.Request, secret *corev1.Secret) *corev1.Pod {
+func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.Ipman, cm *corev1.ConfigMap) *corev1.Pod {
+	vs := corev1.VolumeSource{
+		ConfigMap: &corev1.ConfigMapVolumeSource{
+			LocalObjectReference: corev1.LocalObjectReference{
+				Name: cm.Name,
+			},
+		},
+	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      CharonPodName,
-			// TODO: handle namespace well
 			Namespace: "ims",
 			Labels: map[string]string{
 				"ipserviced": "true", // to get picked up by the service
@@ -308,6 +439,10 @@ func (r *IpmanReconciler) createCharonPod(req ctrl.Request, secret *corev1.Secre
 			Volumes: []corev1.Volume{
 				{Name: CharonSocketVolume},
 				{Name: CharonConfVolume},
+				{
+					Name: "charon-conn",
+					VolumeSource: vs,
+				},
 			},
 			HostNetwork: true,
 			HostPID: true,
@@ -316,7 +451,7 @@ func (r *IpmanReconciler) createCharonPod(req ctrl.Request, secret *corev1.Secre
 				r.createRestCtlContainer(),
 			},
 			InitContainers: []corev1.Container{
-				r.createConfInitContainer(secret),
+				r.createConfInitContainer(secret, ipman),
 			},
 		},
 	}
@@ -343,12 +478,13 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: CharonSocketVolume, MountPath: "/var/run/"},
 			{Name: CharonConfVolume, MountPath: "/etc/swanctl"},
+			{Name: "charon-conn", MountPath: "/etc/charon-conn"},
 		},
 		SecurityContext: r.createNetAdminSecurityContext(),
 	}
 }
 
-func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret) corev1.Container {
+func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret, ipman *ipmanv1.Ipman) corev1.Container {
 	return corev1.Container{
 		ImagePullPolicy: corev1.PullAlways,
 		Name:  "create-conf",
@@ -356,7 +492,7 @@ func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret) corev1.
 		Command: []string{
 			"sh", "-c",
 			fmt.Sprintf("echo '%s' > /etc/swanctl/swanctl.conf",
-				r.Config.Spec.SerializeToConf(101, string(secret.Data["psk"]))),
+				ipman.Spec.SerializeToConf(string(secret.Data["psk"]))),
 		},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: CharonConfVolume, MountPath: "/etc/swanctl"},
@@ -367,7 +503,7 @@ func (r *IpmanReconciler) createConfInitContainer(secret *corev1.Secret) corev1.
 
 // rke2 requires seccomp profile set to runtime default or localhost
 func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
-	//TODO: figure out exactly which
+	// TODO: figure out exactly which
 	// container require what and make
 	// this more specific. charon pod
 	// needs to run as root to load
@@ -380,7 +516,6 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 
 		AllowPrivilegeEscalation: &privEsc,
 		Capabilities: &corev1.Capabilities{
-			// TODO: add this back
 			Drop: []corev1.Capability{"ALL"},
 		},
 	}

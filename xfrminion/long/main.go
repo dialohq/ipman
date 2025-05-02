@@ -2,13 +2,11 @@ package main
 
 import (
 	"fmt"
-	// "io"
 	"encoding/json"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
-	"strconv"
 	"strings"
 )
 
@@ -17,22 +15,10 @@ type CommandResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
-var (
-	if_id        int64 = 101
-	remote_ts          = "10.0.1.0/24"
-	local_ts           = "10.0.2.0/24"
-	local_subnet       = strings.Split(local_ts, "/")[1]
-
-	xfrm_if_name = "xfrm" + strconv.FormatInt(if_id, 10)
-	xfrm_ip      = "10.0.2.1"
-
-	vxlan_ip      = "10.0.2.2"
-	vxlan_if_name = "vxlan" + strconv.FormatInt(if_id, 10)
-	// name of default interface for inter-pod comms
-	cilium_pod_default_interface = "eth0"
-)
-
 func addEntry(w http.ResponseWriter, r *http.Request) {
+	ifid := os.Getenv("IF_ID")
+	vxlan_if_name := "vxlan" + ifid
+
 	r.ParseForm()
 	var splitPath []string
 	argsPassed := strings.Contains(r.URL.String(), "?")

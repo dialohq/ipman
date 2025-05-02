@@ -1,7 +1,8 @@
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
-  name: cluster-pod-access
+  name: cluster-resource-access
+# TODO: limit this as much as possible
 rules:
 - apiGroups: [""]
   resources: ["pods"]
@@ -9,6 +10,12 @@ rules:
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "watch", "list", "update", "create"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "watch", "list", "update", "create"]
 - apiGroups: ["ipman.dialo.ai"]
   resources: ["ipmen"]
+  verbs: ["get", "watch", "list", "update", "create"]
+- apiGroups: ["ipman.dialo.ai"]
+  resources: ["ipmen/status"]
   verbs: ["get", "watch", "list", "update", "create"]

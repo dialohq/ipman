@@ -2,19 +2,27 @@ apiVersion: ipman.dialo.ai/v1
 kind: Ipman
 metadata:
   name: sodies-nix
-  namespace: default
+  namespace: ims
 spec:
-  name: "connection-name"
-  remoteAddr: "xxx.xxx.xxx.xxx/xx"
-  localAddr: "xxx.xxx.xxx.xxx/xx"
-  localId: "xxx.xxx.xxx.xxx/xx"
-  remoteId: "xxx.xxx.xxx.xxx/xx"
+  name: "3s"
+  remoteAddr: "xxx.xxx.xxx.xxx"
+  localAddr: "xxx.xxx.xxx.xxx"
+  localId: "xxx.xxx.xxx.xxx"
+  remoteId: "xxx.xxx.xxx.xxx"
   secretRef:
     name: "ipsec-secret"
     namespace: "default"
     key: "psk"
   children:
-    - name: "child-name"
+    - name: "3s"
       localTs: "10.0.2.0/24"
       remoteTs: "10.0.1.0/24"
+      xfrmIfIp: "10.0.2.1/24"
+      vxlanIfIp: "10.0.2.2/24"
+      if_id: 101
+      ip_pool:
+        - "10.0.2.3/24"
+        - "10.0.2.4/24"
+        - "10.0.2.5/24"
+        - "10.0.2.6/24"
   nodeName: "node-01"

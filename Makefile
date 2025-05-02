@@ -14,7 +14,7 @@ push:
 
 .PHONY: deploy
 deploy:
-	-cd config && kubectl apply                   \
+	cd config && kubectl apply                   \
 		-f namespace.yaml                         \
 		-f service_account.yaml                   \
 		-f cluster_role.yaml                      \
