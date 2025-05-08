@@ -31,7 +31,7 @@ spec:
         - mountPath: /etc/webhook/certs
           name: webhook-certs
           readOnly: true
-        image: plan9better/controller:latest
+        image: plan9better/operator:latest
         imagePullPolicy: Always
         name: manager
         securityContext:

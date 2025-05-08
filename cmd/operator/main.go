@@ -61,6 +61,7 @@ func main() {
 
 	whh := ipmanwhv1.WebhookHandler{
 		Client: mgr.GetClient(),
+		Config: *mgr.GetConfig(),
 	}
 	whServer.Register("/mutating", &whh)
 

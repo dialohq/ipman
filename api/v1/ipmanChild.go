@@ -3,20 +3,24 @@ package v1
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // TODO: support other auth than PSK
 type Child struct {
-	Name        string          `json:"name"`
-	LocalTs     string          `json:"localTs"`
-	RemoteTs    string          `json:"remoteTs"`
-	If_id       int             `json:"if_id"`
-	Ip_pool     []string        `json:"ip_pool"`
-	Xfrm_if_ip  string          `json:"xfrmIfIp"`
-	Vxlan_if_ip string          `json:"vxlanIfIp"`
+	Name      string              `json:"name"`
+	LocalIps  []string            `json:"local_ips"`
+	RemoteIps []string            `json:"remote_ips"`
+	XfrmIfId  int                 `json:"if_id"`
+	IpPools   map[string][]string `json:"ip_pools"`
+	XfrmIP    string              `json:"xfrm_ip"`
+	VxlanIP   string              `json:"vxlan_ip"`
 }
 
 func (c *Child) SerializeToConf() string {
+	local_ts := strings.Join(c.LocalIps, ",")
+	remote_ts := strings.Join(c.RemoteIps, ",")
+
 	conf := fmt.Sprintf(`
 			%s {
 				if_id_in = %d
@@ -28,11 +32,9 @@ func (c *Child) SerializeToConf() string {
 			    dpd_action = restart
 			    rekey_time = 1h
 			}
-		`, c.Name, c.If_id, c.If_id, c.LocalTs, c.RemoteTs)
+		`, c.Name, c.XfrmIfId, c.XfrmIfId, local_ts, remote_ts)
 	return conf
 }
-
-
 
 func childrenEqual(a, b []Child) bool {
 	if len(a) != len(b) {
@@ -51,11 +53,15 @@ func childrenEqual(a, b []Child) bool {
 		if a[i].Name != b[i].Name {
 			return false
 		}
-		if a[i].LocalTs != b[i].LocalTs {
-			return false
+		for j := range a[i].LocalIps {
+			if a[i].LocalIps[j] != b[i].LocalIps[j] {
+				return false
+			}
 		}
-		if a[i].RemoteTs != b[i].RemoteTs {
-			return false
+		for j := range a[i].RemoteIps{
+			if a[i].RemoteIps[j] != b[i].RemoteIps[j] {
+				return false
+			}
 		}
 	}
 	return true

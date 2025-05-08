@@ -39,28 +39,34 @@ spec:
               children:
                 items:
                   properties:
-                    localTs:
-                      type: string
-                    xfrmIfIp:
-                      type: string
-                    vxlanIfIp:
-                      type: string
-                    name:
-                      type: string
-                    remoteTs:
-                      type: string
-                    if_id:
-                      type: integer
-                    ip_pool:
+                    local_ips:
                       type: array
                       items:
                         type: string
+                    xfrm_ip:
+                      type: string
+                    vxlan_ip:
+                      type: string
+                    name:
+                      type: string
+                    remote_ips:
+                      type: array
+                      items:
+                        type: string
+                    if_id:
+                      type: integer
+                    ip_pools:
+                      type: object
+                      additionalProperties:
+                        type: array
+                        items:
+                          type: string
                   required:
-                  - localTs
                   - name
-                  - remoteTs
                   - if_id
-                  - ip_pool
+                  - ip_pools
+                  - xfrm_ip
+                  - vxlan_ip
                   type: object
                 type: array
               localId:
@@ -102,14 +108,28 @@ spec:
             type: object
             properties:
               xfrmGatewayIp:
-                type: string
+                type: object
+                additionalProperties:
+                  type: string
               freeIPs:
                 type: object
                 description: A map of child name to list of free ips
                 additionalProperties:
-                  type: array
-                  items:
-                    type: string
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+              pendingIPs:
+                type: object
+                description: A map of child name to list of pending ips
+                additionalProperties:
+                  type: object
+                  additionalProperties:
+                    type: array
+                    items:
+                      type: string
+
         type: object
     served: true
     storage: true

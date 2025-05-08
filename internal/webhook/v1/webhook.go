@@ -6,17 +6,23 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
-	
+	"slices"
+	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	"github.com/jrhouston/k8slock"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type WebhookHandler struct{
 	Client client.Client
+	Config rest.Config
 }
 
 func writeResponseNoPatch(w http.ResponseWriter, in *admissionv1.AdmissionReview){
@@ -42,16 +48,18 @@ func writeResponseDenied(w http.ResponseWriter, in *admissionv1.AdmissionReview)
 }
 
 func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
+	
 	in, err := parseRequest(*r)
 	if err != nil {
 		println("Error parsing request: ", err)
 	}
+	ctx := context.Background()
+	logger := log.FromContext(ctx,"webhook", true, "PodName", in.Request.Name)
 
 	if(in.Request.Kind.Kind != "Pod"){
 		writeResponseNoPatch(w, in)
 		return 
 	}
-
 	var pod corev1.Pod
 	json.Unmarshal(in.Request.Object.Raw, &pod)
 	cn, ok := pod.Annotations["ipman.dialo.ai/childName"]
@@ -60,7 +68,13 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 		return 
 	} 
 
-	ctx := context.Background()
+	// TODO: if not specified probably only 1
+	pn, ok := pod.Annotations["ipman.dialo.ai/poolName"]
+	if !ok {
+		writeResponseNoPatch(w, in)
+		return 
+	} 
+
 	ipmans := &ipmanv1.IpmanList{}
 	err = wh.Client.List(ctx, ipmans)
 	if err != nil {
@@ -89,14 +103,49 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	}
 	fmt.Println("Ipman is not nil")
 
-	if len(ipman.Status.FreeIPs[ipmanChild.Name]) == 0 {
+	clientSet, err := kubernetes.NewForConfig(&wh.Config)
+	if err != nil {
+		logger.Error(err, "Couldn't create clientset for managing leases")
+		writeResponseDenied(w, in)
+	}
+	locker, err := k8slock.NewLocker("ipman-" + ipman.Name + "-lease-lock",
+		k8slock.TTL(5 * time.Second),
+		k8slock.Namespace("ims"),
+		k8slock.Clientset(clientSet),
+	)
+	if err != nil {
+		logger.Error(err, "Couldn't create a lease locker instance")
+	}
+
+	// prevent race conditions for IP address
+	// from ipman status with leases
+	locker.Lock()
+	if len(ipman.Status.FreeIPs[ipmanChild.Name][pn]) == 0 {
 		fmt.Printf("There are no free IP addresses for child %s, denying request for pod\n", ipmanChild.Name)
 		writeResponseDenied(w, in)
 		return
 	}
 	fmt.Println("there is an ip address available")
 
-	patch := patch(&pod, ipman.Status.FreeIPs[ipmanChild.Name][0], ipman.Status.XfrmGatewayIP)
+	pool, ok := ipman.Status.FreeIPs[ipmanChild.Name][pn]
+	if !ok {
+		fmt.Println("Error, couldn't find pool", pod.Annotations["ipman.dialo.ai/poolName"], "in child ", ipmanChild.Name)
+	}
+	patch := patch(&pod, pool[0], ipman.Status.XfrmGatewayIPs[ipmanChild.Name])
+	ipman.Status.FreeIPs[ipmanChild.Name][pn] = slices.Delete(ipman.Status.FreeIPs[ipmanChild.Name][pn], 0, 1)
+	if ipman.Status.PendingIPs == nil {
+		ipman.Status.PendingIPs = map[string]string{}
+	}
+	ipman.Status.PendingIPs[pool[0]] = pod.Name + "-" + pod.Namespace
+	err = wh.Client.Update(ctx, ipman)
+	if err != nil {
+		logger.Error(err, "Couldn't update status of ipman")
+		locker.Unlock()
+		writeResponseDenied(w, in)
+		return
+	}
+
+	
 	fmt.Println("created patch")
 	resp := response(patch, in)
 	fmt.Println("created response")
@@ -112,21 +161,21 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	w.Write(respJson)
 }
 
-func encodeSecret(im *ipmanv1.Child, gwIP ,vxIP string) *corev1.Secret{
-	d := map[string][]byte{
-		"if_id": []byte(fmt.Sprint(im.If_id)),
-		"vxlan_ip": []byte(vxIP),
-		"gateway_ip": []byte(gwIP),
-		"remote_ts": []byte(im.RemoteTs),
-	}
-	return &corev1.Secret{
-		ObjectMeta: metav1.ObjectMeta{
-			Name: "ipman-secret-" + im.Name,
-			Namespace: "ims",
-		},
-		Data: d,
-	}
-}
+// func encodeSecret(im *ipmanv1.Child, gwIP ,vxIP string) *corev1.Secret{
+// 	d := map[string][]byte{
+// 		"if_id": []byte(fmt.Sprint(im.XfrmIfId)),
+// 		"vxlan_ip": []byte(vxIP),
+// 		"gateway_ip": []byte(gwIP),
+// 		"remote_ts": []byte(im.RemoteTs),
+// 	}
+// 	return &corev1.Secret{
+// 		ObjectMeta: metav1.ObjectMeta{
+// 			Name: "ipman-secret-" + im.Name,
+// 			Namespace: "ims",
+// 		},
+// 		Data: d,
+// 	}
+// }
 
 func initContainer(ip string, cn string, gateway string) *corev1.Container{
 	return &corev1.Container{

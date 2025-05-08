@@ -1,3 +1,2 @@
-kubeconfig
-certs/*
-samples/ipman.yaml
+./certs
+./samples

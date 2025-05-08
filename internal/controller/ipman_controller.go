@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -73,15 +74,19 @@ func (r *IpmanReconciler) isReconcilingKindIpman(ctx context.Context, req reconc
 	return true, nil
 } 
 
-func (r *IpmanReconciler) createIpmanFreeIps(ipman *ipmanv1.Ipman, ctx context.Context) (map[string][]string, error){
+func (r *IpmanReconciler) createIpmanFreeIps(ipman *ipmanv1.Ipman, ctx context.Context) (map[string]map[string][]string, error){
 	logger := log.FromContext(ctx)
 	
 	childNames := []string{}
-
-	status := map[string][]string{}
+	status := map[string]map[string][]string{}
 	for _, child := range ipman.Spec.Children {
-		status[child.Name] = slices.Clone(child.Ip_pool)
-		childNames = append(childNames, child.Name)
+		for poolName, ips := range child.IpPools {
+			if status[child.Name] == nil {
+				status[child.Name] = map[string][]string{}
+			}
+			status[child.Name][poolName] = slices.Clone(ips)
+			childNames = append(childNames, child.Name)
+		}
 	}
 
 	podlist := &corev1.PodList{}
@@ -106,11 +111,17 @@ func (r *IpmanReconciler) createIpmanFreeIps(ipman *ipmanv1.Ipman, ctx context.C
 
 	for _, pod := range podsWithAnnotation {
 		childName := pod.Annotations["ipman.dialo.ai/childName"]
+		poolName := pod.Annotations["ipman.dialo.ai/poolName"]
 		vxlanIp := pod.Annotations["ipman.dialo.ai/vxlan"] 
-		status[childName] = slices.DeleteFunc(status[childName], func(ip string)bool{
+		status[childName][poolName] = slices.DeleteFunc(status[childName][poolName], func(ip string)bool {
 			return ip == vxlanIp
 		})
+		p := slices.Collect(maps.Keys(ipman.Status.PendingIPs))
+		status[childName][poolName] = slices.DeleteFunc(status[childName][poolName], func(ip string)bool {
+			return slices.Contains(p, ip)
+		})
 	}
+	logger.Info("Updating status", "status", status)
 
 	return status, nil
 }
@@ -165,15 +176,17 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 			return ctrl.Result{RequeueAfter: time.Duration(time.Second * 10)}, nil
 		}
 
-		if ipman.Status.XfrmGatewayIP != xfrmPod.Status.HostIP{
-			ipman.Status.XfrmGatewayIP = xfrmPod.Status.HostIP
+		if ipman.Status.XfrmGatewayIPs == nil {
+			ipman.Status.XfrmGatewayIPs = map[string]string{}
+		}
+		if ipman.Status.XfrmGatewayIPs[c.Name] != xfrmPod.Status.PodIP{
+			ipman.Status.XfrmGatewayIPs[c.Name] = xfrmPod.Status.PodIP
 			err = r.Status().Update(ctx, ipman)
 			if err != nil {
 				logger.Error(err, "Error changing status of ipman","ipman", ipman)
 				return ctrl.Result{RequeueAfter: time.Duration(10 * time.Second)}, nil
 			}
 		}
-		
 	}
 
 	return ctrl.Result{}, nil
@@ -226,7 +239,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child) (
 
 	var xfrmPod corev1.Pod
 	nsn := types.NamespacedName{
-		Name:      XfrmPodName,
+		Name:      XfrmPodName + "-" + c.Name,
 		Namespace: "ims",
 	}
 
@@ -253,10 +266,11 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child) (
 func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child) *corev1.Pod{
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      XfrmPodName,
+			Name:      XfrmPodName + "-" + c.Name,
 			Namespace: "ims",
 		},
 		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
 			HostPID: true,
 			SecurityContext: &corev1.PodSecurityContext{
 				Sysctls: []corev1.Sysctl{
@@ -281,13 +295,13 @@ func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child) *corev1.Pod{
 			Containers: []corev1.Container{
 				{
 					Name: "xfrm-container", 
-					Image: "plan9better/xfrminion-long:latest",
+					Image: "plan9better/xfrminion-agent:latest",
 					ImagePullPolicy: corev1.PullAlways,
 					SecurityContext: r.createNetAdminSecurityContext(),
 					Env: []corev1.EnvVar{
 						{
 							Name: "IF_ID",
-							Value: strconv.FormatInt(int64(c.If_id), 10),
+							Value: strconv.FormatInt(int64(c.XfrmIfId), 10),
 						},
 					},
 				},
@@ -295,7 +309,7 @@ func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child) *corev1.Pod{
 			InitContainers: []corev1.Container{
 				{
 					Name: "iface-request",
-					Image: "plan9better/xfrminion:latest",
+					Image: "plan9better/xfrminion-init:latest",
 					ImagePullPolicy: corev1.PullAlways,
 					SecurityContext: r.createNetAdminSecurityContext(),
 					Env: []corev1.EnvVar{
@@ -357,7 +371,7 @@ func (r *IpmanReconciler) getSecret(ctx context.Context, ipman *ipmanv1.Ipman) (
 func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Secret, ipman *ipmanv1.Ipman) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 	nsn := types.NamespacedName {
-		Name: fmt.Sprintf("%s-configmap", ipman.Name),
+		Name: fmt.Sprintf("ipman-%s-configmap", ipman.Name),
 		Namespace: "ims",
 	}
 	cm := &corev1.ConfigMap{}
@@ -378,8 +392,8 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 			}
 			d[c.Name] = string(b)
 		}
-		cm = &corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
+		cm = &corev1.ConfigMap {
+			ObjectMeta: metav1.ObjectMeta {
 				Name: nsn.Name,
 				Namespace: nsn.Namespace,
 			},
@@ -392,11 +406,10 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 		}
 		logger.Info("config map created")
 	}
-	// TODO: if found, update
 
 	var charonPod corev1.Pod
 	nsn = types.NamespacedName{
-		Name:      CharonPodName,
+		Name:      CharonPodName + "-" + ipman.Name,
 		Namespace: "ims",
 	}
 
@@ -429,7 +442,7 @@ func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.
 	}
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      CharonPodName,
+			Name:      CharonPodName + "-" + ipman.Name,
 			Namespace: "ims",
 			Labels: map[string]string{
 				"ipserviced": "true", // to get picked up by the service
@@ -516,7 +529,7 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 
 		AllowPrivilegeEscalation: &privEsc,
 		Capabilities: &corev1.Capabilities{
-			Drop: []corev1.Capability{"ALL"},
+			Add: []corev1.Capability{"NET_ADMIN", "NET_RAW"},
 		},
 	}
 }
@@ -530,7 +543,6 @@ func (r *IpmanReconciler) createCharonDaemonSecurityContext() *corev1.SecurityCo
 
 func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
 	def := r.createDefaultSecurityContext()
-	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN"}
 	return def
 }
 

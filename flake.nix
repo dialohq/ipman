@@ -1,35 +1,76 @@
 {
-  description = "ipsec connection manager";
+  description = "A very basic flake";
 
-  inputs.nixpkgs.url = "nixpkgs/nixos-unstable";
+  inputs = {
+    nixpkgs.url = "github:nixos/nixpkgs?ref=nixos-unstable";
+    flake-utils.url = "github:numtide/flake-utils";
+    nix2container.url = "github:nlewo/nix2container";
+    nix-filter.url = "github:numtide/nix-filter";
+  };
 
   outputs = {
-    self,
     nixpkgs,
-  }: let
-    # to work with older version of flakes
-    lastModifiedDate = self.lastModifiedDate or self.lastModified or "19700101";
+    flake-utils,
+    nix2container,
+    nix-filter,
+    ...
+  }:
+    flake-utils.lib.eachDefaultSystem (
+      system: let
+        pkgs = import nixpkgs {inherit system;};
+        n2cPkgs = nix2container.packages."${system}";
 
-    # Generate a user-friendly version number.
-    version = builtins.substring 0 8 lastModifiedDate;
+        operator = pkgs.buildGoModule {
+          pname = "ipman-operator";
+          src = nix-filter {
+            root = ./.;
+            include = [
+              "internal"
+              "api"
+              "go.mod"
+              "cmd/operator"
+            ];
+          };
+          subPackages = ["cmd/operator"];
+          version = "unversioned";
+          vendorHash = "sha256-yh8Rle3LFeokRsokzKAV2/ivuaIjQZMsW9errFKvxxM=";
+        };
 
-    # System types to support.
-    supportedSystems = ["x86_64-linux" "x86_64-darwin" "aarch64-linux" "aarch64-darwin"];
+        operatorImage = n2cPkgs.nix2container.buildImage {
+          name = "plan9better/operator";
+          tag = "testing";
+          copyToRoot = operator;
+        };
+        test = pkgs.runCommand "mytest" {} ''
+          mkdir -p $out/bin/
+          touch $out/bin/file
+          ls -lah > $out/bin/file
+        '';
+        testImage = n2cPkgs.nix2container.buildImage {
+          name = "somefkntest";
+          tag = "testing";
+          copyToRoot = "${pkgs.tcpdump}/bin/tcpdump";
+        };
+      in {
+        packages = {
+          test = test;
+          testImage = testImage;
+          operator = operator;
+          operatorImage = operatorImage;
+        };
 
-    # Helper function to generate an attrset '{ x86_64-linux = f "x86_64-linux"; ... }'.
-    forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-
-    # Nixpkgs instantiated for supported system types.
-    nixpkgsFor = forAllSystems (system: import nixpkgs {inherit system;});
-  in {
-    # Add dependencies that are only needed for development
-    devShells = forAllSystems (system: let
-      pkgs = nixpkgsFor.${system};
-    in {
-      default = pkgs.mkShell {
-        buildInputs = with pkgs; [go gopls delve gdlv gotools go-tools kubebuilder docker kubectl];
-      };
-    });
-    defaultPackage = forAllSystems (system: self.packages.${system}.vipKops);
-  };
+        devShells.default = pkgs.mkShell {
+          packages = with pkgs; [
+            go
+            gopls
+            gnumake
+          ];
+          shellHook = ''
+            zsh
+            go mod tidy
+          '';
+          env.KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
+        };
+      }
+    );
 }
