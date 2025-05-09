@@ -165,7 +165,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 	logger.Info("Charon pod is alive and well")
 
 	for _, c := range ipman.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c)
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 		}
@@ -234,7 +234,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	return ctrl.Result{}, nil
 }
 
-func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child) (*corev1.Pod, error){
+func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName string) (*corev1.Pod, error){
 	logger := log.FromContext(ctx)
 
 	var xfrmPod corev1.Pod
@@ -247,7 +247,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child) (
 	if apierrors.IsNotFound(err) {
 		logger.Info("xfrm pod not found, creating", "podName", XfrmPodName)
 
-		xfrmPod := r.createXfrmPod(c)
+		xfrmPod := r.createXfrmPod(c, nodeName)
 		if err := r.Create(ctx, xfrmPod); err != nil {
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
@@ -263,13 +263,16 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child) (
 
 }
 
-func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child) *corev1.Pod{
+func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string) *corev1.Pod{
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      XfrmPodName + "-" + c.Name,
 			Namespace: "ims",
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
 			RestartPolicy: corev1.RestartPolicyNever,
 			HostPID: true,
 			SecurityContext: &corev1.PodSecurityContext{
@@ -449,6 +452,9 @@ func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.
 			},
 		},
 		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": ipman.Spec.NodeName,
+			},
 			Volumes: []corev1.Volume{
 				{Name: CharonSocketVolume},
 				{Name: CharonConfVolume},

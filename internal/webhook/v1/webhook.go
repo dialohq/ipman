@@ -131,7 +131,7 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	if !ok {
 		fmt.Println("Error, couldn't find pool", pod.Annotations["ipman.dialo.ai/poolName"], "in child ", ipmanChild.Name)
 	}
-	patch := patch(&pod, pool[0], ipman.Status.XfrmGatewayIPs[ipmanChild.Name])
+	patch := patch(&pod, pool[0], ipman.Status.XfrmGatewayIPs[ipmanChild.Name], ipman.Spec.NodeName)
 	ipman.Status.FreeIPs[ipmanChild.Name][pn] = slices.Delete(ipman.Status.FreeIPs[ipmanChild.Name][pn], 0, 1)
 	if ipman.Status.PendingIPs == nil {
 		ipman.Status.PendingIPs = map[string]string{}
@@ -264,8 +264,21 @@ func createRestartPolicyPatch() *jsonPatch {
 	}
 }
 
-func patch(p *corev1.Pod, ip string, gateway string) []byte {
+func createNodeSelectorPatch(nodeName string) *jsonPatch {
+	return &jsonPatch{
+		Op: "add",
+		Path: "/spec/nodeSelector",
+		Value: map[string]string{
+			"kubernetes.io/hostname": nodeName,
+		},
+	}
+}
+
+func patch(p *corev1.Pod, ip string, gateway string, nodeName string) []byte {
 	patch := []jsonPatch{}
+	nsp := createNodeSelectorPatch(nodeName)
+	patch = append(patch, *nsp)
+	
 	ap := createAnnotationPatch(p, ip)
 	if ap == nil {
 		fmt.Println("Error creating annotation patch. Annotations:", p.ObjectMeta.Annotations)
