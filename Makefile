@@ -6,12 +6,11 @@ GOARCH ?= amd64
 PLATFORM ?= linux/amd64
 
 
-BINARIES := operator restctl vxlandlord xfrminion-init xfrminion-agent
+BINARIES := operator restctl vxlandlord xfrminion
 IMG_operator        := ${REGISTRY}/controller:latest
 IMG_restctl         := ${REGISTRY}/restctl:latest
 IMG_vxlandlord      := ${REGISTRY}/vxlandlord:latest
-IMG_xfrminion-init  := ${REGISTRY}/xfrminion-init:latest
-IMG_xfrminion-agent := ${REGISTRY}/xfrminion-agent:latest
+IMG_xfrminion       := ${REGISTRY}/xfrminion:latest
 
 .PHONY: all build docker push deploy clean all-clean
 
@@ -83,12 +82,9 @@ nix-build:
 vxlandlord:
 	docker build -t plan9better/vxlandlord:latest --platform linux/amd64 --file ./vxlandlord.Dockerfile .
 	docker push plan9better/vxlandlord:latest 
-xfrminit:
-	docker build -t plan9better/xfrminion-init:latest --platform linux/amd64 --file ./xfrminit.Dockerfile .
-	docker push plan9better/xfrminion-init:latest 
-xfrmagent:
-	docker build -t plan9better/xfrminion-agent:latest --platform linux/amd64 --file ./xfrmagent.Dockerfile .
-	docker push plan9better/xfrminion-agent:latest 
+xfrminion:
+	docker build -t plan9better/xfrminion:latest --platform linux/amd64 --file ./xfrminion.Dockerfile .
+	docker push plan9better/xfrminion:latest 
 restctl:
 	docker build -t plan9better/restctl:latest --platform linux/amd64 --file ./restctl.Dockerfile .
 	docker push plan9better/restctl:latest 

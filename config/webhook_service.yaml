@@ -7,8 +7,15 @@ metadata:
 spec:
   ports:
   - port: 443
+    name: "webhook"
     protocol: TCP
     targetPort: 8443
+
+  - port: 61410
+    name: "state"
+    protocol: TCP
+    targetPort: 61410
+
   selector:
     app.kubernetes.io/name: ipman
     control-plane: controller-manager

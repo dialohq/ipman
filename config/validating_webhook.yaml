@@ -1,20 +1,19 @@
 apiVersion: admissionregistration.k8s.io/v1
-kind: MutatingWebhookConfiguration
+kind: ValidatingWebhookConfiguration
 metadata:
-  name: ipman-mutating-webhook
+  name: ipman-validating-webhook
 webhooks:
 - name: webhook.ipman.dialo.ai
-  timeoutSeconds: 30
-  failurePolicy: Fail
+  # failurePolicy: Fail
   admissionReviewVersions: ["v1"]
-  sideEffects: NoneOnDryRun
+  sideEffects: None
   clientConfig:
     # base64 -w 0 tls.crt 
     caBundle: LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCk1JSUMvRENDQWVTZ0F3SUJBZ0lVUVJyNE90dnlKV1lqK1ZVNUtQZ211RWJ5NEZJd0RRWUpLb1pJaHZjTkFRRUwKQlFBd0ZqRVVNQklHQTFVRUF4TUxSR2xoYkc4dVlXa2dRMEV3SGhjTk1qVXdOVEE0TVRReU5EQXdXaGNOTWpZdwpOVEE0TVRReU5EQXdXakFXTVJRd0VnWURWUVFERXd0RWFXRnNieTVoYVNCRFFUQ0NBU0l3RFFZSktvWklodmNOCkFRRUJCUUFEZ2dFUEFEQ0NBUW9DZ2dFQkFNdUsvVHNicHZ2Tzg4bFFtRTZ4RVJOWVZNcDRBTnh0VldYR0xxN0UKanMrc0VxdGxpYW9WaUxyL0hpVE1mcjVpTWNUR0piU0VwcS9pVXJrTDdjTmxvTUFqdWRkb2dQY3NwM3ExUHFIaQptdkZOc2VUL0JLY25rYUVJTDh3eTRUdjV2V00xNFlTRmc2eThjclp4dkR4dERDWlNlY0w4NjJvZTlQc0Nhb01yCmo5U2RPK1hyK2NsTTBlaWFScTk0NFZ2ZVBEYVhsZ2RoSTd0aldEL2VwRDNZSGFQVEQ0QUN6NjJPMGViM2FreisKOGpXOXN3ZUZrUlpuRGlPbWhzZWk2eG9MUGFXMWZVQ1ZWKzNoNlEya2tCbjZ3WUNDUUFJUFlXZWRqRm1jajlQOQptL0hud2kyQit5R0lrT0RpZlpXMVF2U29Gb0pNK01ndWE0SkdIVXJQKzJqTlluc0NBd0VBQWFOQ01FQXdEZ1lEClZSMFBBUUgvQkFRREFnRUdNQThHQTFVZEV3RUIvd1FGTUFNQkFmOHdIUVlEVlIwT0JCWUVGTjc3OTYxZ3pYQVIKSDNlcjhxNzMydUdkcjEvd01BMEdDU3FHU0liM0RRRUJDd1VBQTRJQkFRQVB0dGptYlRRT1psc0FNZmFTLzU4OQpxOEExQTM1djkyRmVobVlPMDExZTcyU0Z5UE9OU0ZaZEhrMnByNzJPd1prdGJ1NU1QbDlUdlJjbjdZMVdnRFB2CkJRcVVtZDRlMkRPcS9JdGFKeU9JVVZuVjJOMDhHSk5wakRaK2VydGdmUVdyd21CV2lKK0FCY2VNLzhFaGp1YnkKakpxWVZuUVM3TG4rbSswcHptM0RzaWJXZElEOUpmYW12TzdJeFQ2UEVVRFBrOU5XdVRRUWZvTzF5L09PdmtEYwpxRHhmUzVYNnpqK3Z0M2REUjNVbWVlWDRiQ2t0UG04ZFA1UjJBZ0lQQi96bm01V0o5NVd6ZnNrT25qQVo2NjlFCldWV1ZsVmxEWkdiWU5HR3l4L292ZytWdGg4OWFYTmtEc0ovT2xHTS9GN1JEaEx4UmdvMnVlZm96dVFDMHFVL1gKLS0tLS1FTkQgQ0VSVElGSUNBVEUtLS0tLQo=
     service:
       namespace: ims
       name: ipman-webhook-service
-      path: /mutating
+      path: /validating
       port:  443
   # this is here to prevent a deadlock
   # since the webhook server is itself
@@ -33,3 +32,4 @@ webhooks:
     apiGroups: [""]
     apiVersions: ["v1"]
     resources: ["pods"]
+

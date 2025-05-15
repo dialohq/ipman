@@ -64,12 +64,17 @@
             go
             gopls
             gnumake
+            tokei
           ];
           shellHook = ''
             zsh
             go mod tidy
           '';
           env.KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
+          env.CHARON_POD_NAME = "charon-pod";
+          env.XFRM_POD_NAME = "xfrm-pod";
+          env.NAMESPACE_NAME = "ims";
+          env.EDITOR = "hx";
         };
       }
     );

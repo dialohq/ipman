@@ -1,6 +1,9 @@
 package v1
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -17,12 +20,19 @@ type Child struct {
 	VxlanIP   string              `json:"vxlan_ip"`
 }
 
+func (c *Child)HashSum() string {
+	out, _ := json.Marshal(c)
+	hash := sha256.Sum256(out)
+	return hex.EncodeToString(hash[:])
+}
+
 func (c *Child) SerializeToConf() string {
 	local_ts := strings.Join(c.LocalIps, ",")
 	remote_ts := strings.Join(c.RemoteIps, ",")
 
 	conf := fmt.Sprintf(`
 			%s {
+				start_action = trap
 				if_id_in = %d
 				if_id_out = %d
 				local_ts = %s

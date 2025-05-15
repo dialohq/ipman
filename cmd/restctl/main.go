@@ -37,8 +37,6 @@ func getAction(path string, childName *string) (*exec.Cmd, error) {
 		switch path {
 		case "/status":
 			return swanExec("--list-conns"), nil
-		case "/reload":
-			return swanExec("--load-all", "--file", "/etc/swanctl/swanctl.conf"), nil
 		case "/config":
 			return exec.Command("cat", "/etc/swanctl/swanctl.conf"), nil
 		default:
@@ -104,10 +102,10 @@ func p0ng(w http.ResponseWriter, r *http.Request) {
 
 var xfrmPodCiliumIPs map[string]string = map[string]string{}
 
-// TODO: clean this up
 func createXfrm(w http.ResponseWriter, r *http.Request) {
 	handler := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(handler)
+	w.Header().Set("Content-Type", "application/json")
 
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -116,43 +114,13 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var xd comms.XfrmData
-	err = json.Unmarshal(out, &xd)
+	xrd := &comms.XfrmRequestData{}
+	err = json.Unmarshal(out, xrd)
 	if err != nil {
-		logger.Error("Couldn't unmarshall body of request for xfrm interface, try again in 10s", "msg", err)
+		logger.Error("Couldn't unmarshal body of request for xfrm", "msg", err)
 		writeResponseWait(w, 10)
 		return
 	}
-	logger.Info("Received xfrom data", "data", xd)
-
-	w.Header().Set("Content-Type", "application/json")
-
-	xfrmPodCiliumIPs[xd.ChildName] = xd.CiliumIP
-
-	cm, err := os.ReadFile(CHARON_CONN + xd.ChildName)
-	if err != nil {
-		fmt.Println("Couldn't read file at " + CHARON_CONN + xd.ChildName)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	conf := &ipmanv1.Child{}
-	err = json.Unmarshal(cm, conf)
-	if err != nil {
-		fmt.Println("Couldn't unmarshal data from file into child struct, try agian in 10s")
-		writeResponseWait(w, 10)
-		return
-	}
-
-	xi := comms.XfrmInfo{
-		XfrmIfId: int64(conf.XfrmIfId),
-		RemoteIps: conf.RemoteIps,
-		LocalIps:  conf.LocalIps,
-		XfrmIp:   conf.XfrmIP,
-		VxlanIp:  conf.VxlanIP,
-		Wait:     0,
-	}
-	fmt.Println("xi:", xi)
 
 	ciliumIface, err := netconfig.FindDefaultInterface()
 	if err != nil {
@@ -160,41 +128,55 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 		writeResponseWait(w, 10)
 		return
 	}
+	linkName := "xfrm" + strconv.FormatInt(int64(xrd.XfrmIfId), 10)
 	a := ip.LinkAttrs{
-		Name:        "xfrm" + strconv.FormatInt(int64(conf.XfrmIfId), 10),
+		Name:        linkName,
 		NetNsID:     -1,
 		TxQLen:      -1,
-		Index:       conf.XfrmIfId,
 		ParentIndex: (*ciliumIface).Attrs().Index,
 	}
 	xfrmIface := ip.Xfrmi{
 		LinkAttrs: a,
-		Ifid:      uint32(conf.XfrmIfId),
+		Ifid:      uint32(xrd.XfrmIfId),
 	}
 	err = ip.LinkAdd(&xfrmIface)
 	if err != nil {
-		logger.Error("Couldn't create xfrm interface", "msg", err, "interface", xfrmIface)
+		logger.Info("Error adding link, trying to delete conflicting one", "msg", err)
+		l, err := ip.LinkByName(linkName)
+		if err != nil {
+			logger.Error("No link with that name found","msg" , err, "link", l)
+		}
+
+		err = ip.LinkDel(l)
+		if err != nil {
+			logger.Error("Couldn't delete conflicting interface", "msg", err, "interface", xfrmIface)
+			writeResponseWait(w, 10)
+			return
+		}
+
+		err = ip.LinkAdd(&xfrmIface)
+		if err != nil {
+			logger.Error("Couldn't add interface after deletion", "msg", err, "interface", xfrmIface)
+			writeResponseWait(w, 10)
+			return
+		}
+	}
+
+	err = ip.LinkSetNsPid(&xfrmIface, int(xrd.PID))
+	if err != nil {
+		logger.Error("Couldn't move interface into netns by pid", "interface", xfrmIface, "pid", xrd.PID, "msg", err)
 		writeResponseWait(w, 10)
 		return
 	}
 
-	err = ip.LinkSetNsPid(&xfrmIface, int(xd.PID))
-	if err != nil {
-		logger.Error("Couldn't move interface into netns by pid", "interface", xfrmIface, "pid", xd.PID, "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	out, err = json.Marshal(xi)
-	if err != nil {
-		fmt.Println("Couldnt marshall xi", xi)
-	}
-	fmt.Println("Marshalled xi: ", string(out))
-	json.NewEncoder(w).Encode(xi)
+	logger.Info("Added xfrm interface", "name", xfrmIface.Attrs().Name)
+	json.NewEncoder(w).Encode(comms.XfrmResponseData{Error: ""})
 	return
 }
 
 func writeResponseWait(w http.ResponseWriter, t int) {
+	// TODO: vxlan and xfrm structs share it but
+	// something custom would be better
 	vi := comms.VxlanInfo{
 		Wait: t,
 	}
@@ -206,7 +188,6 @@ func writeResponseWait(w http.ResponseWriter, t int) {
 func createVxlan(w http.ResponseWriter, r *http.Request) {
 	handler := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(handler)
-
 
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -222,7 +203,6 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 		writeResponseWait(w, 10)
 		return
 	}
-	logger.Info("Received vxlan data", "data", vd)
 
 	// TODO: exponential backoff??
 	if _, ok := xfrmPodCiliumIPs[vd.ChildName]; !ok{
@@ -237,7 +217,6 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 		writeResponseWait(w, 10)
 		return
 	}
-	logger.Info("Read config map", "cm", cm)
 
 	conf := &ipmanv1.Child{}
 	err = json.Unmarshal(cm, conf)
@@ -246,7 +225,6 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 		writeResponseWait(w, 10)
 		return
 	}
-	logger.Info("read data from config map", "config", conf)
 
 	var vi comms.VxlanInfo
 	vi.IfId = conf.XfrmIfId
@@ -254,9 +232,52 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 	vi.XfrmUnderlyingIP = xfrmPodCiliumIPs[vd.ChildName]
 	vi.RemoteIps = conf.RemoteIps
 	vi.Wait = 0
-	fmt.Println("vd.vxlanifip: ", vd.VxlanIfIp)
 	http.Get(fmt.Sprintf("http://%s:8080/add?ip=%s&vxlanIp=%s", xfrmPodCiliumIPs[vd.ChildName], vd.VxlanCiliumIP, vd.VxlanIfIp))
+	logger.Info("Added vxlan interface", "id", vi.IfId)
 	json.NewEncoder(w).Encode(vi)
+}
+
+func reloadConfig(w http.ResponseWriter, r *http.Request){
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(h)
+
+	dataBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		logger.Error(err.Error(), "Error reading body of request for reload")
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
+	}
+	
+	data := &comms.ReloadData{}
+	err = json.Unmarshal(dataBytes, data)
+	if err != nil {
+		logger.Error("Error unmarshalling data of request for reload", "msg", err.Error(), "request", string(dataBytes))
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
+	}
+
+	err = os.WriteFile(SWAN_CONF_PATH, []byte(data.SerializedConfig), 0644)
+	if err != nil {
+		logger.Error(err.Error(), "Error writing data of request for reload to file")
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
+	}
+
+	logger.Info("Reloading swanctl")
+	cmd := swanExec("--load-all", "--file", SWAN_CONF_PATH)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		logger.Error("Couldn't reload swanctl","output", string(out),"error", err)
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
+	}
+
+	w.WriteHeader(200)
+	w.Write([]byte("OK"))
 }
 
 func main() {
@@ -264,11 +285,11 @@ func main() {
 	logger := slog.New(h)
 
 	http.HandleFunc("/status", runCommandHandler)
-	http.HandleFunc("/reload", runCommandHandler)
 	http.HandleFunc("/config", runCommandHandler)
 	http.HandleFunc("/init", runCommandHandler)
 	http.HandleFunc("/terminate", runCommandHandler)
 	http.HandleFunc("/p1ng", p0ng)
+	http.HandleFunc("/reload", reloadConfig)
 	http.HandleFunc("/xfrm", createXfrm)
 	http.HandleFunc("/vxlan", createVxlan)
 

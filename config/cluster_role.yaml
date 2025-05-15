@@ -6,7 +6,7 @@ metadata:
 rules:
 - apiGroups: [""]
   resources: ["pods"]
-  verbs: ["get", "list", "update", "create", "watch"]
+  verbs: ["get", "list", "update", "create", "watch", "delete"]
 - apiGroups: [""]
   resources: ["secrets"]
   verbs: ["get", "list", "watch"]
@@ -18,7 +18,7 @@ rules:
   verbs: ["get", "list", "update", "create", "watch"]
 - apiGroups: ["ipman.dialo.ai"]
   resources: ["ipmen/status"]
-  verbs: ["get", "update", "create"]
+  verbs: ["get", "update", "create", "patch"]
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
   verbs: ["create", "delete", "list", "get", "watch", "update"]

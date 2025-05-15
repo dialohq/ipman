@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -13,8 +14,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
-	ipmanwhv1 "dialo.ai/ipman/internal/webhook/v1"
 	cont "dialo.ai/ipman/internal/controller"
+	ipmanwhv1 "dialo.ai/ipman/internal/webhook/v1"
 )
 
 var (
@@ -52,9 +53,23 @@ func main() {
 		Port: 8443,
 		CertDir: "/etc/webhook/certs",
 	})
+	stateServe := manager.Server{
+		Name: "stateServer",
+		Server: &http.Server{
+			Addr: ":61410",
+			Handler: &stateServer{
+				Client: mgr.GetClient(),
+				Config: *mgr.GetConfig(),
+			},
+		},
+	}
 
 	if err = mgr.Add(whServer); err != nil{
 		logger.Error(err, "Error registering wh server with the manager")
+		os.Exit(1)
+	}
+	if err = mgr.Add(&stateServe); err != nil{
+		logger.Error(err, "Error state server with the manager")
 		os.Exit(1)
 	}
 	

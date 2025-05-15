@@ -19,8 +19,9 @@ func secretRefEqual(a, b SecretRef) bool {
 
 type IpmanStatus struct {
 	XfrmGatewayIPs map[string]string              `json:"xfrmGatewayIp"`
-	FreeIPs       map[string]map[string][]string `json:"freeIPs"`
-	PendingIPs       map[string]string `json:"pendingIPs"`
+	FreeIPs       map[string]map[string][]string `json:"freeIps"`
+	PendingIPs       map[string]string `json:"pendingIps"`
+	CharonPodIP string `json:"charonPodIp"`
 }
 
 type Ipman struct {

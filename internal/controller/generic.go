@@ -1,0 +1,77 @@
+package controller
+
+import (
+	"context"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"log/slog"
+	"time"
+	"os"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+
+)
+
+// rke2 requires seccomp profile set to runtime default or localhost
+func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
+	// TODO: figure out exactly which
+	// container require what and make
+	// this more specific. charon pod
+	// needs to run as root to load
+	// plugins 
+	privEsc := false
+	return &corev1.SecurityContext{
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+
+		AllowPrivilegeEscalation: &privEsc,
+		Capabilities: &corev1.Capabilities{
+			Add: []corev1.Capability{"NET_ADMIN", "NET_RAW"},
+		},
+	}
+}
+
+func (r *IpmanReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext{
+	def := r.createDefaultSecurityContext()
+	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"}
+	return def
+
+}
+
+func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
+	def := r.createDefaultSecurityContext()
+	return def
+}
+
+
+func waitForPodReady(pod *corev1.Pod,
+					 nsn types.NamespacedName,
+					 get func(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error)(*corev1.Pod, error){
+
+	ctx := context.Background()
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(h)
+
+	logger.Info("Waiting for pod containers to be ready", "pod", pod.Name)
+	for pod.Status.Phase != "Running"{
+		err := get(ctx, nsn, pod)
+		if err != nil {
+			logger.Error("Error fetching charon pod while checking for container readiness", "msg", err, "pod", pod.Name,)
+		}
+		time.Sleep(1 * time.Second)
+	}
+
+	logger.Info("Waiting for pod to get assigned ip", "pod", pod.Name)
+	for pod.Status.PodIP == "" {
+		err := get(ctx, nsn, pod)
+		if err != nil {
+			logger.Error("Error fetching charon pod while waiting for ip allocation", "msg", err)
+			return nil, err
+		}
+		time.Sleep(1 * time.Second)
+	}
+	logger.Info("Pod ready", "pod", pod.Name)
+	return pod, nil
+}
+

@@ -1,21 +1,15 @@
 package main
 
 import (
-	"bytes"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net"
-	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
 	"strings"
-	"time"
 
 	"log/slog"
 
-	"dialo.ai/ipman/pkg/comms"
 	"dialo.ai/ipman/pkg/netconfig"
 	u "dialo.ai/ipman/pkg/utils"
 	ip "github.com/vishvananda/netlink"
@@ -57,7 +51,6 @@ func main() {
 	addrs, err := ip.AddrList(*ciliumInterface, ip.FAMILY_V4)
 	u.Fatal(err, logger, "Error listing addresses")
 
-	logger.Info("Found ip address", "address", addrs)
 	if len(addrs) == 0 {
 		u.Fatal(fmt.Errorf("List of addresses is empty"),
 			logger,
@@ -66,47 +59,20 @@ func main() {
 	ciliumIP := addrs[0].IP
 	logger.Info("Default IP identified", "IP", ciliumIP, "Interface", (*ciliumInterface).Attrs().Name)
 
-	// ask charon-pod restctl api for data
-	vxlanIP := os.Getenv("VXLAN_IP")
-	childName := os.Getenv("CHILD_NAME")
-	// xfrmGatewayIp := os.Getenv("XFRM_GATEWAY")
+	vxlanIp := os.Getenv("VXLAN_IP")
+	xfrmIp := os.Getenv("XFRM_IP")
+	ifId64, _ := strconv.ParseInt(os.Getenv("INTERFACE_ID"), 10, 64)
+	ifId := int(ifId64)
+	xfrmUnderlyingIp := os.Getenv("XFRM_GATEWAY_IP")
+	remoteIpsCSV := os.Getenv("REMOTE_IPS")
+	remoteIps := strings.Split(remoteIpsCSV, ",")
 
-	p, err := json.Marshal(&comms.VxlanData{VxlanCiliumIP: ciliumIP.String(), ChildName: childName, VxlanIfIp: vxlanIP})
-	u.Fatal(err, logger, "Error marshaling body of reqeust to charon-pod")
-
-	req, err := http.NewRequest("POST", "http://ipman-controller-service.ims.svc/vxlan", bytes.NewBuffer(p))
-	u.Fatal(err, logger, "Error preparing reqeust to charon-pod")
-
-	req.Header.Add("Content-Type", "application/json")
-
-	client := &http.Client{}
-	var vi comms.VxlanInfo
-	done := false
-	for !done {
-		res, err := client.Do(req)
-		u.Fatal(err, logger, "Error sending request")
-
-		out, err := io.ReadAll(res.Body)
-		u.Fatal(err, logger, "Error reading response body")
-
-		err = json.Unmarshal(out, &vi)
-		u.Fatal(err, logger, "Couldn't unmarshal response from charon-pod")
-		if vi.Wait == 0 {
-			done = true
-		} else {
-			logger.Info("Waiting", "Time", vi.Wait)
-			time.Sleep(time.Duration(vi.Wait) * time.Second)
-		}
-
-	}
-	logger.Info("Received data from restctl", "data", vi)
-
-	vxlanIpAddr, subnetString, found := strings.Cut(vxlanIP, "/")
+	vxlanIpAddr, subnetString, found := strings.Cut(vxlanIp, "/")
 	if !found {
 		u.Fatal(
 			fmt.Errorf("Couldn't find separator '/'"),
 			logger,
-			fmt.Sprintf("Error cutting vxlan IP (%s)", vxlanIP),
+			fmt.Sprintf("Error cutting vxlan IP (%s)", vxlanIp),
 		)
 	}
 	subnetInt, err := strconv.ParseInt(subnetString, 10, 8)
@@ -119,29 +85,28 @@ func main() {
 		Mask: net.CIDRMask(int(subnetInt), 32),
 	}
 
-	xfrmIpAddr, _, _ := strings.Cut(vi.XfrmIP, "/")
+	xfrmIpAddr, _, _ := strings.Cut(xfrmIp, "/")
 	IpBytes, err = netconfig.IpToByteArray(xfrmIpAddr)
 	u.Fatal(err, logger, "Error converting IP of xfrm to byte array")
 	xfrm_ipnet := net.IPNet{
 		IP:   net.IPv4(IpBytes[0], IpBytes[1], IpBytes[2], IpBytes[3]),
 		Mask: net.CIDRMask(int(subnetInt), 32),
 	}
-
-	vxlan, err := createVxlan(ciliumInterface, addrs[0].IP, vi.IfId)
-	u.Fatal(err, logger, fmt.Sprintf("Error creating vxlan interface"))
+	vxlan, err := createVxlan(ciliumInterface, addrs[0].IP, ifId)
+	u.Fatal(err, logger, "Error creating vxlan interface")
 
 	err = ip.LinkSetUp(*vxlan)
 	u.Fatal(err, logger, "Error settings vxlan interface up")
 
 	ip.AddrAdd(*vxlan, &ip.Addr{IPNet: &vxlan_ipnet})
-	if !u.IsValidIPv4(vi.XfrmUnderlyingIP) {
+	if !u.IsValidIPv4(xfrmUnderlyingIp) {
 		u.Fatal(
-			fmt.Errorf("%s is not a valid ipv4 address", vi.XfrmUnderlyingIP),
+			fmt.Errorf("%s is not a valid ipv4 address", xfrmUnderlyingIp),
 			logger,
 			"Error preparing ip address to append to bridge fdb",
 		)
 	}
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("bridge fdb append 00:00:00:00:00:00 dev %s dst %s", "vxlan"+strconv.FormatInt(int64(vi.IfId), 10), vi.XfrmUnderlyingIP))
+	cmd := exec.Command("bash", "-c", fmt.Sprintf("bridge fdb append 00:00:00:00:00:00 dev %s dst %s", "vxlan"+strconv.FormatInt(int64(ifId), 10), xfrmUnderlyingIp))
 	_, err = cmd.Output()
 	u.Fatal(err, logger, "Error appending to bridge fdb")
 
@@ -153,15 +118,10 @@ func main() {
 	}
 
 	err = ip.RouteAdd(r)
-	// u.Fatal(err, logger, "Error adding route to xfrm interface", "route", r)
-	if err != nil {
-		logger.Info("Error adding route to xfrm interface", "route", r, "err", err)
-		for {
-			time.Sleep(5 * time.Second)
-		}
-	}
+	u.Fatal(err, logger, "Error adding route to xfrm interface", "route", r)
 
-	for _, remote := range vi.RemoteIps {
+	logger.Info("Adding routes")
+	for _, remote := range remoteIps {
 		_, remoteIpNet, err := net.ParseCIDR(remote)
 		r := &ip.Route{
 			LinkIndex: (*vxlan).Attrs().Index,
@@ -173,5 +133,6 @@ func main() {
 
 		err = ip.RouteAdd(r)
 		u.Fatal(err, logger, "Error adding route", "route", r)
+		logger.Info("Added route", "route", r)
 	}
 }
