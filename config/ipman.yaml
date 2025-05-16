@@ -108,7 +108,7 @@ spec:
                     type: array
                     items:
                       type: string
-              charonPodIp:
+              charonProxyIp:
                 type: string
               pendingIps:
                 type: object

@@ -28,33 +28,34 @@
               "internal"
               "api"
               "go.mod"
+              "go.sum"
               "cmd/operator"
+              "pkg/"
             ];
           };
           subPackages = ["cmd/operator"];
           version = "unversioned";
-          vendorHash = "sha256-yh8Rle3LFeokRsokzKAV2/ivuaIjQZMsW9errFKvxxM=";
+          vendorHash = "sha256-hgwtBP0SVyGEEPI/B6qAm3MdSOYFV1N9wGnm1XdkrKk=";
         };
 
         operatorImage = n2cPkgs.nix2container.buildImage {
           name = "plan9better/operator";
           tag = "testing";
-          copyToRoot = operator;
-        };
-        test = pkgs.runCommand "mytest" {} ''
-          mkdir -p $out/bin/
-          touch $out/bin/file
-          ls -lah > $out/bin/file
-        '';
-        testImage = n2cPkgs.nix2container.buildImage {
-          name = "somefkntest";
-          tag = "testing";
-          copyToRoot = "${pkgs.tcpdump}/bin/tcpdump";
+          copyToRoot =
+            pkgs.runCommand "operator-root" {
+              buildInputs = [pkgs.coreutils];
+            } ''
+              mkdir -p $out/bin
+              cp ${operator}/bin/operator $out/bin/
+            '';
+
+          # copyToRoot = pkgs.buildEnv {
+          #   name = "operator-root";
+          #   paths = [operator];
+          # };
         };
       in {
         packages = {
-          test = test;
-          testImage = testImage;
           operator = operator;
           operatorImage = operatorImage;
         };
@@ -65,16 +66,21 @@
             gopls
             gnumake
             tokei
+            dockerfile-language-server-nodejs
           ];
           shellHook = ''
             zsh
             go mod tidy
           '';
-          env.KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
-          env.CHARON_POD_NAME = "charon-pod";
-          env.XFRM_POD_NAME = "xfrm-pod";
-          env.NAMESPACE_NAME = "ims";
-          env.EDITOR = "hx";
+          env = {
+            KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
+            CHARON_POD_NAME = "charon-pod";
+            XFRM_POD_NAME = "xfrm-pod";
+            NAMESPACE_NAME = "ims";
+            API_SOCKET_PATH = "/restctlsock/restctl.sock";
+            PROXY_SOCKET_DIR = "/var/run/restctl";
+            EDITOR = "hx";
+          };
         };
       }
     );

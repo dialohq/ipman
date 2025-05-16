@@ -86,7 +86,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 			PID: prd.Pid,
 		}
 
-		charonUrl := fmt.Sprintf("http://%s:8080", charonPodIp)
+		charonUrl := fmt.Sprintf("http://%s", charonPodIp)
 		resp, err = comms.SendPost(charonUrl + "/xfrm", xfrmRequest)
 
 		if err != nil {

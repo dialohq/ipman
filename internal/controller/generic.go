@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"time"
 	"os"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 
@@ -65,7 +66,7 @@ func waitForPodReady(pod *corev1.Pod,
 	logger.Info("Waiting for pod to get assigned ip", "pod", pod.Name)
 	for pod.Status.PodIP == "" {
 		err := get(ctx, nsn, pod)
-		if err != nil {
+		if err != nil && !apierrors.IsNotFound(err){
 			logger.Error("Error fetching charon pod while waiting for ip allocation", "msg", err)
 			return nil, err
 		}

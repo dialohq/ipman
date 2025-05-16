@@ -32,6 +32,9 @@ spec:
           name: webhook-certs
           readOnly: true
         image: plan9better/operator:latest
+        env:
+        - name: PROXY_SOCKET_PATH
+          value: "/var/run/restctl/"
         imagePullPolicy: Always
         name: manager
         securityContext:

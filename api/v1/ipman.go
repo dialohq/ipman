@@ -21,7 +21,7 @@ type IpmanStatus struct {
 	XfrmGatewayIPs map[string]string              `json:"xfrmGatewayIp"`
 	FreeIPs       map[string]map[string][]string `json:"freeIps"`
 	PendingIPs       map[string]string `json:"pendingIps"`
-	CharonPodIP string `json:"charonPodIp"`
+	CharonProxyIP string `json:"charonProxyIp"`
 }
 
 type Ipman struct {

@@ -25,11 +25,14 @@ import (
 )
 
 var (
-	CharonPodName        = "charon-pod"
-	CharonSocketVolume   = "charon-volume"
-	CharonConfVolume     = "charon-conf"
-	CharonContainerImage = "plan9better/strongswan-charon:0.0.1"
-	XfrmPodName          = "xfrm-pod"
+	CharonPodName                 = "charon-pod"
+	// CharonApiSocketVolumeHostPath = "/var/run/restctl"
+	CharonApiSocketVolumePath     = "/restctlsock/"
+	CharonApiSocketVolumeName     = "restctl"
+	CharonSocketVolume            = "charon-volume"
+	CharonConfVolume              = "charon-conf"
+	CharonContainerImage          = "plan9better/strongswan-charon:0.0.1"
+	XfrmPodName                   = "xfrm-pod"
 )
 
 type IpmanReconciler struct {
@@ -160,7 +163,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 		return err
 	}
 
-	charonPod, err := r.ensureCharonPod(ctx, secret, ipman)
+	_, proxyPod, err := r.ensureCharonPod(ctx, secret, ipman)
 	if err != nil {
 		return fmt.Errorf("failed to ensure Charon pod: %w", err)
 	}
@@ -170,7 +173,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 		return err
 	}
 
-	ipman.Status.CharonPodIP = charonPod.Status.PodIP
+	ipman.Status.CharonProxyIP = proxyPod.Status.PodIP
 	err = r.Status().Update(ctx, ipman)
 	if err != nil {
 		logger.Error(err, "Could't update status of ipman to add charon pod ip")
@@ -178,7 +181,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 	}
 
 	for _, c := range ipman.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonPodIP)
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 			return err
@@ -260,7 +263,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		return res(rq), err
 	}
 
-	logger.Info("Waiting for pod to get assigned ip", "")
+	logger.Info("Waiting for pod to get assigned ip")
 	for pod.Status.PodIP == "" {
 		time.Sleep(1 * time.Second)
 		err = r.Get(ctx, req.NamespacedName, pod)

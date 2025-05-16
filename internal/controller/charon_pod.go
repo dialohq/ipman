@@ -2,16 +2,18 @@ package controller
 
 import (
 	"context"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"fmt"
+	"os"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	"dialo.ai/ipman/pkg/comms"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	"dialo.ai/ipman/pkg/comms"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func charonPodNsn(ipmanName string) types.NamespacedName {
@@ -28,7 +30,7 @@ func charonPodNsn(ipmanName string) types.NamespacedName {
 	}
 }
 
-func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Secret, ipman *ipmanv1.Ipman) (*corev1.Pod, error) {
+func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Secret, ipman *ipmanv1.Ipman) (*corev1.Pod, *corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	charonPod := &corev1.Pod{}
@@ -39,21 +41,28 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 		charonPod = r.createCharonPod(secret, ipman)
 		if err := r.Create(ctx, charonPod); err != nil {
 			logger.Error(err, "Failed to create Charon pod")
-			return nil, err
+			return nil, nil, err
 		}
 
 	} else if err != nil {
 		logger.Error(err, "Error checking Charon pod existence")
-		return nil, err
+		return nil, nil, err
 	}
 
 	charonPod, err = waitForPodReady(charonPod, charonPodNsn(ipman.Name), r.Get)
 	if err != nil {
 		logger.Error(err, "Error while waiting for charon pod to be ready")
-		return nil, err
+		return nil, nil, err
 	}
 
-	url := "http://" + charonPod.Status.PodIP + ":8080/reload"
+	proxyPod, err := r.ensureCharonProxy(charonPod.Name, charonPod.Spec.NodeName)
+	if err != nil {
+		logger.Error(err, "Couldn't ensure charon proxy pod")
+		return nil, nil, err
+	}
+	proxyPod, err = waitForPodReady(proxyPod, proxyPodNsn(proxyPod.Name), r.Get)
+
+	url := "http://" + proxyPod.Status.PodIP + "/reload"
 	data := &comms.ReloadData{
 		SerializedConfig: ipman.Spec.SerializeToConf(string(secret.Data["psk"])),
 	}
@@ -66,16 +75,14 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 
 	if resp.StatusCode != 200{
 		logger.Error(err, "error getting", "resp", resp)
-		return nil, fmt.Errorf("Error reloading charon pod (%s)", charonPod.Name)
+		return nil, nil, fmt.Errorf("Error reloading charon pod (%s)", charonPod.Name)
 	}
 
-	return charonPod, nil
+	return charonPod, proxyPod, nil
 }
 
 func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.Ipman) *corev1.Pod {
-	vs := corev1.VolumeSource{
-		EmptyDir: &corev1.EmptyDirVolumeSource{},
-	}
+	path := os.Getenv("PROXY_SOCKET_PATH")
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      CharonPodName + "-" + ipman.Name,
@@ -88,13 +95,12 @@ func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.
 			NodeSelector: map[string]string{
 				"kubernetes.io/hostname": ipman.Spec.NodeName,
 			},
+			RestartPolicy: corev1.RestartPolicyNever,
 			Volumes: []corev1.Volume{
 				{Name: CharonSocketVolume},
 				{Name: CharonConfVolume},
-				{
-					Name: "charon-conn",
-					VolumeSource: vs,
-				},
+				{Name: "charon-conn"},
+				createCharonProxySocketVolume(path),
 			},
 			HostNetwork: true,
 			HostPID: true,
@@ -104,6 +110,85 @@ func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.
 			},
 			InitContainers: []corev1.Container{
 				r.createConfInitContainer(secret, ipman),
+			},
+		},
+	}
+}
+
+func (r *IpmanReconciler) ensureCharonProxy(charonPodName, nodeName string) (*corev1.Pod, error) {
+	ctx := context.Background()
+	logger := log.FromContext(ctx)
+
+	proxyPodName := charonPodName+"-proxy"
+	proxyPod := &corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: proxyPodName, Namespace: "ims"}, proxyPod)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			logger.Error(err, "Error fetching proxy pod")
+			return nil, err
+		}
+
+		proxyPod = r.createCharonProxyPod(proxyPodName, nodeName)
+		err = r.Create(ctx, proxyPod)
+		if err != nil {
+			logger.Error(err, "Error creating proxy pod", "spec", *proxyPod)
+			return nil, err
+		}
+	}
+	
+	return proxyPod, nil
+}
+
+func createCharonProxySocketVolume(path string) corev1.Volume{
+	HostPathType := corev1.HostPathDirectoryOrCreate
+	return corev1.Volume{
+		Name: CharonApiSocketVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: path,
+				Type: &HostPathType,
+			},
+		},
+	}
+}
+
+func proxyPodNsn(name string) types.NamespacedName {
+	return types.NamespacedName{
+		Name:name,
+		Namespace: "ims",
+	}
+}
+
+func (r *IpmanReconciler) createCharonProxyPod(proxyPodName, nodeName string) *corev1.Pod {
+	url := fmt.Sprintf("unix/%s%s", CharonApiSocketVolumePath, "restctl.sock")
+	path := os.Getenv("PROXY_SOCKET_PATH")
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: proxyPodName,
+			Namespace: "ims",
+		},
+		Spec: corev1.PodSpec{
+			NodeSelector: map[string]string{
+				"kubernetes.io/hostname": nodeName,
+			},
+			Volumes: []corev1.Volume{
+				createCharonProxySocketVolume(path),
+			},
+			Containers: []corev1.Container{
+				{
+					Name: "caddy-proxy",
+					ImagePullPolicy: corev1.PullAlways,
+					Image: "caddy:2.10.0-alpine",
+					VolumeMounts: []corev1.VolumeMount {
+						{
+							Name: CharonApiSocketVolumeName,
+							MountPath: CharonApiSocketVolumePath,
+						},
+					},
+					// it has to be --from :80 for it to be http on all interfaces
+					Command: []string{"caddy", "reverse-proxy", "--debug", "--from", ":80",  "--to", url},
+					SecurityContext: r.createNetAdminSecurityContext(),
+				},
 			},
 		},
 	}
@@ -128,6 +213,7 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 		Name:  "restctl",
 		Image: "plan9better/restctl",
 		VolumeMounts: []corev1.VolumeMount{
+			{Name: CharonApiSocketVolumeName, MountPath: CharonApiSocketVolumePath},
 			{Name: CharonSocketVolume, MountPath: "/var/run/"},
 			{Name: CharonConfVolume, MountPath: "/etc/swanctl"},
 			{Name: "charon-conn", MountPath: "/etc/charon-conn"},

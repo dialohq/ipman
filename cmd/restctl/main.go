@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -21,6 +22,7 @@ import (
 var (
 	SWAN_CONF_PATH = "/etc/swanctl/swanctl.conf"
 	CHARON_CONN    = "/etc/charon-conn/"
+	API_SOCKET_PATH= "/restctlsock/restctl.sock"
 )
 
 type CommandResponse struct {
@@ -106,6 +108,7 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 	handler := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(handler)
 	w.Header().Set("Content-Type", "application/json")
+	logger.Info("Adding xfrm interface")
 
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -281,20 +284,33 @@ func reloadConfig(w http.ResponseWriter, r *http.Request){
 }
 
 func main() {
+	
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
-	http.HandleFunc("/status", runCommandHandler)
-	http.HandleFunc("/config", runCommandHandler)
-	http.HandleFunc("/init", runCommandHandler)
-	http.HandleFunc("/terminate", runCommandHandler)
-	http.HandleFunc("/p1ng", p0ng)
-	http.HandleFunc("/reload", reloadConfig)
-	http.HandleFunc("/xfrm", createXfrm)
-	http.HandleFunc("/vxlan", createVxlan)
+	mux := http.NewServeMux()
 
-	logger.Info("Listening on :8080...")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
-		logger.Error("Error listening", "msg", err)
+	mux.HandleFunc("/status", runCommandHandler)
+	mux.HandleFunc("/config", runCommandHandler)
+	mux.HandleFunc("/init", runCommandHandler)
+	mux.HandleFunc("/terminate", runCommandHandler)
+	mux.HandleFunc("/p1ng", p0ng)
+	mux.HandleFunc("/reload", reloadConfig)
+	mux.HandleFunc("/xfrm", createXfrm)
+	mux.HandleFunc("/vxlan", createVxlan)
+
+	server := http.Server{
+		Handler: mux,
+	}
+
+	listener, err := net.Listen("unix", API_SOCKET_PATH)
+	if err != nil {
+		logger.Error("Error listening on socket", "msg", err, "socket-path", API_SOCKET_PATH)
+		os.Exit(1)
+	}
+
+	logger.Info("Listening on socket", "socket", API_SOCKET_PATH)
+	if err := server.Serve(listener); err != nil {
+		logger.Error("Couldn't start server on listener", "msg", err)
 	}
 }
