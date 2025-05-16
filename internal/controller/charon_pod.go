@@ -38,10 +38,20 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 	if apierrors.IsNotFound(err) {
 		// charon pod doesn't exist
 
-		charonPod = r.createCharonPod(secret, ipman)
-		if err := r.Create(ctx, charonPod); err != nil {
-			logger.Error(err, "Failed to create Charon pod")
-			return nil, nil, err
+		// wait for service to pick up webhooks
+		for {
+			charonPod = r.createCharonPod(secret, ipman)
+			if err := r.Create(ctx, charonPod); err != nil {
+				if apierrors.IsInternalError(err) {
+					logger.Info("Couldn't create charon pod", "error", err)
+					time.Sleep(1 * time.Second)
+					continue
+				} else {
+					logger.Error(err, "Fatal error trying to create charon pod")
+					return nil, nil, err
+				}
+			}
+			break
 		}
 
 	} else if err != nil {

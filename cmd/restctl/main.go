@@ -8,6 +8,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"syscall"
+	"os/signal"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -308,6 +310,14 @@ func main() {
 		logger.Error("Error listening on socket", "msg", err, "socket-path", API_SOCKET_PATH)
 		os.Exit(1)
 	}
+
+	c := make(chan os.Signal, 1)
+    signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+    go func() {
+        <-c
+        os.Remove(API_SOCKET_PATH)
+        os.Exit(1)
+    }()
 
 	logger.Info("Listening on socket", "socket", API_SOCKET_PATH)
 	if err := server.Serve(listener); err != nil {

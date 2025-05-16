@@ -181,7 +181,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 	}
 
 	for _, c := range ipman.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP)
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP, ipman.Name)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 			return err
@@ -259,7 +259,11 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	pod := &corev1.Pod{}
 	err = r.Get(ctx, req.NamespacedName, pod)
 	if err != nil {
-		logger.Error(err, "Reconciled pod not found")
+		if apierrors.IsNotFound(err) {
+			logger.Info("Reconciled pod not found, deleted")
+			return res(nil), nil
+		}
+		logger.Error(err, "error fetching reconciled pod")
 		return res(rq), err
 	}
 

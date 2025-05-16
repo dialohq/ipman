@@ -48,11 +48,6 @@
               mkdir -p $out/bin
               cp ${operator}/bin/operator $out/bin/
             '';
-
-          # copyToRoot = pkgs.buildEnv {
-          #   name = "operator-root";
-          #   paths = [operator];
-          # };
         };
       in {
         packages = {
@@ -65,8 +60,10 @@
             go
             gopls
             gnumake
-            tokei
+            tokei # loc count
             dockerfile-language-server-nodejs
+            yaml-language-server
+            kuttl # kubernetes tests
           ];
           shellHook = ''
             zsh

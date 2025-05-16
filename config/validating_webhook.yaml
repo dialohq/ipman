@@ -19,16 +19,23 @@ webhooks:
   # since the webhook server is itself
   # a pod, without it it would try to
   # call itself on creation.
-  namespaceSelector:
+  objectSelector:
     matchExpressions:
-      - key: kubernetes.io/metadata.name
+      - key: app.kubernetes.io/name
         operator: NotIn
         values:
-          - ims
-          
-  objectSelector: {}
+          - ipman
+      - key: control-plane
+        operator: NotIn
+        values:
+          - controller-manager
   rules:
-  - operations: ["CREATE"]
+  - operations: ["CREATE", "DELETE", "UPDATE"]
+    apiGroups: ["ipman.dialo.ai"]
+    apiVersions: ["v1"]
+    resources: ["ipmen"]
+
+  - operations: ["CREATE", "DELETE"]
     apiGroups: [""]
     apiVersions: ["v1"]
     resources: ["pods"]

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"net/http"
 	"os"
 
 	"k8s.io/apimachinery/pkg/runtime"
@@ -53,32 +52,22 @@ func main() {
 		Port: 8443,
 		CertDir: "/etc/webhook/certs",
 	})
-	stateServe := manager.Server{
-		Name: "stateServer",
-		Server: &http.Server{
-			Addr: ":61410",
-			Handler: &stateServer{
-				Client: mgr.GetClient(),
-				Config: *mgr.GetConfig(),
-			},
-		},
-	}
 
 	if err = mgr.Add(whServer); err != nil{
 		logger.Error(err, "Error registering wh server with the manager")
 		os.Exit(1)
 	}
-	if err = mgr.Add(&stateServe); err != nil{
-		logger.Error(err, "Error state server with the manager")
-		os.Exit(1)
-	}
-	
 
-	whh := ipmanwhv1.WebhookHandler{
+	mwh := ipmanwhv1.MutatingWebhookHandler{
 		Client: mgr.GetClient(),
 		Config: *mgr.GetConfig(),
 	}
-	whServer.Register("/mutating", &whh)
+	vwh := ipmanwhv1.ValidatingWebhookHandler {
+		Client: mgr.GetClient(),
+		Config: *mgr.GetConfig(),
+	}
+	whServer.Register("/mutating", &mwh)
+	whServer.Register("/validating", &vwh)
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		logger.Error(err, "problem running manager")

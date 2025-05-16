@@ -19,12 +19,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func xfrmPodNsn(childName string) types.NamespacedName {
+func xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
 	// podNameEnv := os.Getenv("XFRM_POD_NAME")
 	// ns := os.Getenv("NAMESPACE_NAME")
 	ns := "ims"
 	podNameEnv := "xfrm-pod"
-	podName := strings.Join([]string{podNameEnv, childName}, "-")
+	podName := strings.Join([]string{podNameEnv, childName, ipmanName}, "-")
 
 	return types.NamespacedName{
 		Namespace: ns,
@@ -32,25 +32,21 @@ func xfrmPodNsn(childName string) types.NamespacedName {
 	}
 }
 
-func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName string, charonPodIp string) (*corev1.Pod, error){
+func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName string) (*corev1.Pod, error){
 	logger := log.FromContext(ctx)
 
 	xfrmPod := &corev1.Pod{}
-	nsn := types.NamespacedName{
-		Name:      XfrmPodName + "-" + c.Name,
-		Namespace: "ims",
-	}
 
-	err := r.Get(ctx, nsn, xfrmPod)
+	err := r.Get(ctx, xfrmPodNsn(c.Name, connName), xfrmPod)
 	if apierrors.IsNotFound(err) {
 
-		xfrmPod = r.createXfrmPod(c, nodeName)
+		xfrmPod = r.createXfrmPod(c, nodeName, connName)
 		if err := r.Create(ctx, xfrmPod); err != nil {
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
 		}
 		
-		xfrmPod, err = waitForPodReady(xfrmPod, xfrmPodNsn(c.Name), r.Get)
+		xfrmPod, err = waitForPodReady(xfrmPod, xfrmPodNsn(c.Name, connName), r.Get)
 		if err != nil {
 			logger.Error(err, "Error waiting for xfrm pod to be ready", "pod", xfrmPod.Name)
 			return nil, err
@@ -144,12 +140,15 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 
 }
 
-func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string) (*corev1.Pod) {
+func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string, connName string) (*corev1.Pod) {
 	remoteIpsJSON, _ := json.Marshal(c.RemoteIps)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      XfrmPodName + "-" + c.Name,
+			Name:      XfrmPodName + "-" + c.Name + "-" + connName,
 			Namespace: "ims",
+			Labels: map[string]string{
+				"ipman.dialo.ai/xfrm": connName,
+			},
 			Annotations: map[string]string{
 				"ipman.dialo.ai/childName": c.Name,
 				"ipman.dialo.ai/vxlanip": c.VxlanIP,

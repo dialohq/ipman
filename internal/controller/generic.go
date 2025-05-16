@@ -54,7 +54,6 @@ func waitForPodReady(pod *corev1.Pod,
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
-	logger.Info("Waiting for pod containers to be ready", "pod", pod.Name)
 	for pod.Status.Phase != "Running"{
 		err := get(ctx, nsn, pod)
 		if err != nil {
@@ -63,7 +62,6 @@ func waitForPodReady(pod *corev1.Pod,
 		time.Sleep(1 * time.Second)
 	}
 
-	logger.Info("Waiting for pod to get assigned ip", "pod", pod.Name)
 	for pod.Status.PodIP == "" {
 		err := get(ctx, nsn, pod)
 		if err != nil && !apierrors.IsNotFound(err){
@@ -72,7 +70,6 @@ func waitForPodReady(pod *corev1.Pod,
 		}
 		time.Sleep(1 * time.Second)
 	}
-	logger.Info("Pod ready", "pod", pod.Name)
 	return pod, nil
 }
 

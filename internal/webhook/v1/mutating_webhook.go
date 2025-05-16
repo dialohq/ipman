@@ -3,6 +3,7 @@ package v1
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"fmt"
 	"math/rand"
 	"net/http"
@@ -23,16 +24,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type WebhookHandler struct{
+type MutatingWebhookHandler struct{
 	Client client.Client
 	Config rest.Config
 }
 
+// For dry run, we don't want side effects
+// so creating a lease is off the table
 type dummyLocker struct{}
 func (dl *dummyLocker) Lock(){}
 func (dl *dummyLocker) Unlock(){}
 
-func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
+func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	ctx := context.Background()
 
 	in, err := u.ParseRequest(*r)
@@ -129,19 +132,10 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 		
 	}
 
-	// TODO: stinky
 	if len(ipman.Status.FreeIPs[ipmanChild.Name][poolName]) == 0 {
-		// err = wh.Client.Get(ctx, nsn, ipman)
-		// if err != nil {
-		// 	logger.Error(err, "Couldn't fetch ipman when checking again for free IPs")
-		// 	writeResponseDenied(w, in)
-		// 	return
-		// }
-		// if len(ipman.Status.FreeIPs[ipmanChild.Name][poolName]) == 0 {
 			logger.Info("There are no free IP addresses for requested child. Denying request for pod.\n","child", ipmanChild.Name, "status", ipman.Status)
 			writeResponseDenied(w, in)
 			return
-		// }
 	}
 
 	pool, ok := ipman.Status.FreeIPs[ipmanChild.Name][poolName]
@@ -171,7 +165,6 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 		ipman.Status.PendingIPs = map[string]string{}
 	}
 	ipman.Status.PendingIPs[ip] = time.Now().Format(time.Layout)
-	logger.Info("Pending ip's updated", "pending", ipman.Status.PendingIPs)
 	if !isDryRun{
 		err = wh.Client.Status().Update(ctx, ipman)
 		if err != nil {
@@ -187,8 +180,124 @@ func(wh *WebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	if err != nil {
 		println("Error marshalling response: ", err)
 	}
-	logger.Info("Applying patch", "pod", pod.Name)
 	
 	w.Header().Add("Content-Type", "application/json")
 	w.Write(respJson)
+}
+
+func initContainer(child ipmanv1.Child, gateway string, ip string) *corev1.Container{
+	remoteIps := strings.Join(child.RemoteIps, ",")
+	return &corev1.Container{
+		Name: "iface-request",
+		Image: "plan9better/vxlandlord:latest",
+		ImagePullPolicy: corev1.PullAlways,
+		SecurityContext: createNetAdminSecurityContext(),
+		// TODO: as a config map
+		Env: []corev1.EnvVar{
+			{
+				Name: "VXLAN_IP",
+				Value: ip,
+			},
+			{
+				Name: "XFRM_GATEWAY_IP",
+				Value: gateway,
+			},
+			{
+				Name: "INTERFACE_ID",
+				Value: strconv.FormatInt(int64(child.XfrmIfId), 10),
+			},
+			{
+				Name: "XFRM_IP",
+				Value: child.XfrmIP,
+			},
+			{
+				Name: "REMOTE_IPS",
+				Value: remoteIps,
+			},
+		},
+	}
+}
+
+type jsonPatch struct {
+	Op string `json:"op"`
+	Path string `json:"path"`
+	Value any `json:"value"`
+}
+
+func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
+	patch := []jsonPatch{}
+	for i := range p.Spec.Containers {
+		env := []corev1.EnvVar{
+			{
+				Name:  "VXLAN_IP",
+				Value: ip,
+			},
+		}
+		patch = append(patch, jsonPatch{
+			Op:    "add",
+			Path:  fmt.Sprintf("/spec/containers/%d/env", i),
+			Value: env,
+		})
+	}
+	if len(patch) == 0 {
+		return nil
+	}
+	return patch
+}
+
+func createAnnotationPatch(annotations map[string]string)[]jsonPatch{
+	patches := []jsonPatch{}
+	for key, value := range annotations {
+		// replace '/' with '~1' which jsonPatch replaces back to '/'
+		processedKey := strings.Replace(key, "/", "~1", 1)
+		patches = append(patches, jsonPatch{
+			Op: "add",
+			Path: "/metadata/annotations/" + processedKey,
+			Value: value,
+		})
+	}
+	return patches
+}
+
+func createInitContainerPatch(p *corev1.Pod,child ipmanv1.Child, gateway string, ip string) *jsonPatch {
+	if len(p.Spec.InitContainers) == 0 {
+		return &jsonPatch{
+			Op: "add",
+			Path: "/spec/initContainers",
+			Value: []corev1.Container{*initContainer(child, gateway, ip)},
+		}
+	}
+	return &jsonPatch{
+		Op: "add",
+		Path: "/spec/initContainers/-",
+		Value: *initContainer(child, gateway, ip),
+	}
+}
+
+func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]string, child ipmanv1.Child) []byte {
+	patch := []jsonPatch{}
+	
+	ap := createAnnotationPatch(annotations)
+	if ap == nil {
+		fmt.Println("Error creating annotation patch. Annotations:", p.ObjectMeta.Annotations)
+		return []byte{}
+	}
+	patch = append(patch, ap...)
+
+	icp := createInitContainerPatch(p, child, gateway, ip)
+	patch = append(patch, *icp)
+
+	ep := createEnvPatch(p, ip)
+	if ep == nil {
+		fmt.Println("Error creating env patch. Containers:", p.Spec.Containers)
+		return []byte{}
+	}
+	patch = append(patch, ep...)
+
+	out, err := json.Marshal(patch)
+	if err != nil {
+		println("Error marshalling json patch: ", err)
+	}
+
+	return out
 }
