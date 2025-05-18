@@ -5,16 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"reflect"
 	"slices"
-	"strings"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	u "dialo.ai/ipman/pkg/utils"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
@@ -24,6 +22,12 @@ type ValidatingWebhookHandler struct{
 	Client client.Client
 	Config rest.Config
 }
+
+// actionTypes
+type creationAction struct{}
+type deletionAction struct{}
+type updateAction   struct{}
+type unknownAction  struct{}
 
 func writeResponseNoPatch(w http.ResponseWriter, in *admissionv1.AdmissionReview){
 		w.Header().Add("Content-Type", "application/json")
@@ -47,156 +51,162 @@ func writeResponseDenied(w http.ResponseWriter, in *admissionv1.AdmissionReview,
 		w.Write(rjson)
 }
 
+func validateIpmanDeletion(req *admissionv1.AdmissionRequest, workers []corev1.Pod, xfrm []corev1.Pod) (bool, error) {
+	ipman := &ipmanv1.Ipman{}
+	err := json.Unmarshal(req.OldObject.Raw, ipman)
+	if err != nil {
+		return false, fmt.Errorf("Couldn't unmarshal ipman: %w", err)
+	}
+
+	for _, p := range xfrm {
+		if slices.ContainsFunc(ipman.Spec.Children, func (c ipmanv1.Child) bool {
+			fmt.Println(c.Name,p.Annotations["ipman.dialo.ai/childName"], c.Name == p.Annotations["ipman.dialo.ai/childName"])
+			return c.Name == p.Annotations["ipman.dialo.ai/childName"]
+		}){
+			if !canDeleteXfrm(&p, workers){
+				podNames := []string{}
+				for _, pod := range workers {
+					podNames = append(podNames, pod.Name)
+				}
+				return false, fmt.Errorf("Worker pods use xfrm that belongs to this ipman: %v", podNames)
+			}
+		}
+	}
+
+	return true, nil
+}
+
+func validateIpmanCreation(ipman ipmanv1.Ipman, other []ipmanv1.Ipman, pods []corev1.Pod)(bool, error){
+   	for _, obj := range other {
+   		if obj.Spec.Name == ipman.Spec.Name{
+   			return false, fmt.Errorf("Ipman with that name already exists %s == %s", obj.Spec.Name, ipman.Spec.Name)
+   		}
+   	}
+   	for _, p := range pods {
+   		if p.Annotations["ipman.dialo.ai/ipmanName"] == ipman.Spec.Name {
+   			return false, fmt.Errorf("There are existing pods with this ipman annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
+   		}
+   	}
+   	// no conflicts: allow creation
+   	return true, nil
+}
+func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod)(bool, error){
+		return false, fmt.Errorf("UNIMPLEMENTED")
+}
+
+func getAction(req *admissionv1.AdmissionRequest) any {
+	if len(req.OldObject.Raw) == 0  && len(req.Object.Raw) != 0 {
+		return creationAction{}
+	}
+
+	if len(req.OldObject.Raw) != 0 && len(req.Object.Raw) == 0 {
+		return deletionAction{}
+	} 
+
+	if len(req.OldObject.Raw) != 0 && len(req.Object.Raw) != 0 {
+		return updateAction{}
+	}
+
+	return unknownAction{}
+}
+
+func extractXfrmPods(pods []corev1.Pod) []corev1.Pod {
+	annotatedPods := []corev1.Pod{}
+	for _, p := range pods {
+		if _, ok := p.Annotations["ipman.dialo.ai/childName"]; ok && p.Namespace == "ims"{
+			annotatedPods = append(annotatedPods, p)
+		}
+	}
+	return annotatedPods
+}
+
 func(wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
 	ctx := context.Background()
 	logger := log.FromContext(ctx,"webhook", true)
 
 	in, err := u.ParseRequest(*r)
 	if err != nil {
-		logger.Error(err, "Error parsing request")
+		err = fmt.Errorf("Couldn't parse request for validatoin: %w", err)
+		writeResponseDenied(w, in, err.Error())
 	}
 
-	if in.Request.Kind.Kind != "Pod" {
-		ipman := &ipmanv1.Ipman{}
-		err = json.Unmarshal(in.Request.Object.Raw, ipman)
-		if err != nil {
-			logger.Error(err, "Couldn't unmarshal ipman", "data", string(in.Request.OldObject.Raw))
-			writeResponseNoPatch(w, in)
-			return
-		}
+	action := getAction(in.Request)
+	logger.Info("validating", "action", reflect.TypeOf(action))
 
-		s := labels.SelectorFromSet(map[string]string{
-			"ipman.dialo.ai/xfrm": in.Request.Name,
-		})
-		xfrmPods := &corev1.PodList{}
-		err = wh.Client.List(ctx, xfrmPods, &client.ListOptions{
-			LabelSelector: s,
-		})
-		if err != nil {
-			logger.Error(err, "Error fetching list of xfrm pods to validate ipman")
-			writeResponseDenied(w, in)
-			return
-		}
-		workers := &corev1.PodList{}
-		err = wh.Client.List(ctx, workers)
-		if err != nil {
-			logger.Error(err, "Error listing pods to check if xfrm pod can be deleted in ipman")
-			writeResponseDenied(w, in)
-			return
-		}
+	allPods := &corev1.PodList{}
+	err = wh.Client.List(ctx, allPods)
+	if err != nil {
+		err = fmt.Errorf("Error listing pods for creation validation: %w", err)
+		writeResponseDenied(w, in, err.Error())
+		return
+	}
 
-		for _, p := range xfrmPods.Items {
-			if !slices.ContainsFunc(ipman.Spec.Children, func (c ipmanv1.Child) bool {
-				return c.Name == p.Annotations["ipman.dialo.ai/childName"]
-			}){
-				if !canDeleteXfrm(&p, workers.Items){
-					podNames := []string{}
-					for _, pod := range workers.Items {
-						podNames = append(podNames, pod.Name)
-					}
-					writeResponseDenied(w, in, fmt.Sprintf("Workers use child that's to be deleted: %v", podNames))
-					return
-				}
+	verdict := false
+	switch action.(type) {
+		case creationAction:
+			logger.Info("Create action")
+			ipmen := &ipmanv1.IpmanList{}
+			err = wh.Client.List(ctx, ipmen)
+			if err != nil {
+				err = fmt.Errorf("Couldn't list ipmen: %w", err)
+				writeResponseDenied(w, in, err.Error())
+				return
 			}
-		}
+			// unmarshal new Ipman object from request
+			newIpman := &ipmanv1.Ipman{}
+			if err = json.Unmarshal(in.Request.Object.Raw, newIpman); err != nil {
+				err = fmt.Errorf("Couldn't unmarshal ipman for creation: %w", err)
+				writeResponseDenied(w, in, err.Error())
+				return
+			}
+			verdict, err = validateIpmanCreation(*newIpman, ipmen.Items, allPods.Items)
+
+		case deletionAction:
+
+			xfrmPods := extractXfrmPods(allPods.Items)
+			verdict, err = validateIpmanDeletion(in.Request, allPods.Items, xfrmPods)
+			logger.Info("Verdict", "Verdict", verdict, "error", err)
+
+		case updateAction:
+			old := ipmanv1.Ipman{}
+			err = json.Unmarshal(in.Request.OldObject.Raw, &old)
+			if err != nil {
+				err = fmt.Errorf("Couldn't unmarshal old object: %w", err)
+				writeResponseDenied(w, in, err.Error())
+				return
+			}
+			new := ipmanv1.Ipman{}
+			err = json.Unmarshal(in.Request.OldObject.Raw, &new)
+			if err != nil {
+				err = fmt.Errorf("Couldn't unmarshal new object: %w", err)
+				writeResponseDenied(w, in, err.Error())
+				return
+			}
+			verdict, err = validateIpmanUpdate(new, old, allPods.Items)
+
+		default:
+			logger.Info("unknown action")
+			verdict = false
+			err = fmt.Errorf("Couldn't determine action being taken")
+	}
+
+	if verdict {
 		writeResponseNoPatch(w, in)
 		return
 	}
 
-	pod := &corev1.Pod{}
-	deletion := false
-	if len(in.Request.OldObject.Raw) != 0 {
-		err = json.Unmarshal(in.Request.OldObject.Raw, pod)
-		if err != nil {
-			logger.Error(err, "Couldn't unmarshal old pod", "data", string(in.Request.OldObject.Raw))
-			writeResponseNoPatch(w, in)
-			return
-		}
-		deletion = true
-	} else {
-		err = json.Unmarshal(in.Request.Object.Raw, pod)
-		if err != nil {
-			logger.Error(err, "Couldn't unmarshal new pod", "data", string(in.Request.Object.Raw))
-			writeResponseNoPatch(w, in)
-			return
-		}
-	}
-
-
-	childName, childOk := pod.Annotations["ipman.dialo.ai/childName"]
-	if !childOk {
-		writeResponseNoPatch(w, in)
-		return 
-	} 
-
-	isXfrm := false
-	sn := strings.Split(pod.Name, "-")
-	if len(sn) > 3  && sn[0] == "xfrm" && sn[1] == "pod" && sn[2] == childName{
-		isXfrm = true
-	}
-
-	if isXfrm && !deletion {
-		writeResponseNoPatch(w, in)
-		return
-	}
-
-	if isXfrm && deletion {
-		pods := &corev1.PodList{}
-		err = wh.Client.List(ctx, pods)
-		if err != nil {
-			logger.Error(err, "Error listing pods to check if xfrm pod can be deleted")
-			writeResponseDenied(w, in)
-			return
-		}
-		if canDeleteXfrm(pod, pods.Items) {
-			writeResponseDenied(w, in)
-			return
-		}
-
-		writeResponseNoPatch(w, in)
-		return
-	}
-
-
-	if !isXfrm && !deletion{
-		imn, ok := pod.Annotations["ipman.dialo.ai/ipmanName"]
-		if !ok {
-			logger.Error(fmt.Errorf("not found"), "Pod to be created doesn't have ipman name annotation")
-			writeResponseDenied(w, in, "No annotation")
-			return
-		}
-		ipman := &ipmanv1.Ipman{}
-		nsn := types.NamespacedName{
-			Namespace: "",
-			Name: imn,
-		}
-		err = wh.Client.Get(ctx, nsn , ipman)
-		if err != nil {
-			logger.Error(err, "Couldn't fetch ipman", "nsn", nsn)
-			writeResponseDenied(w, in, "Error fetching ipman")
-			return
-		}
-
-		if ipman.Status.CharonProxyIP == "" {
-			writeResponseDenied(w, in, "No charon proxy ip")
-			return
-		}
-		if ip, ok := ipman.Status.XfrmGatewayIPs[childName]; !ok || ip == "" {
-			writeResponseDenied(w, in, "No xfrm gateway ip")
-			return
-		}
-	}
-
-	writeResponseNoPatch(w, in)
+	writeResponseDenied(w, in, err.Error())
 }
 
 func canDeleteXfrm(xfrm *corev1.Pod, workers []corev1.Pod) bool {
+	fmt.Println("Can delete? ", workers)
 	dependentPods := slices.DeleteFunc(workers, func (p corev1.Pod)bool {
 		cn, okChild := p.Annotations["ipman.dialo.ai/childName"]
 		_, okImn := p.Annotations["ipman.dialo.ai/ipmanName"]
 		_, okPn := p.Annotations["ipman.dialo.ai/poolName"]
 		return !(okChild && okImn && okPn && cn == xfrm.Annotations["ipman.dialo.ai/childName"])
 	})
+	fmt.Println("Can delete end? ", dependentPods)
 	return len(dependentPods) == 0
 }
 
@@ -251,17 +261,3 @@ func response(patch []byte,in *admissionv1.AdmissionReview) *admissionv1.Admissi
 	}
 }
 
-// TODO: this is more or less duplicated in ipman_controller.go
-func createNetAdminSecurityContext() *corev1.SecurityContext {
-	privEsc := false
-	return &corev1.SecurityContext{
-		SeccompProfile: &corev1.SeccompProfile{
-			Type: corev1.SeccompProfileTypeRuntimeDefault,
-		},
-
-		AllowPrivilegeEscalation: &privEsc,
-		Capabilities: &corev1.Capabilities{
-			Add: []corev1.Capability{"NET_ADMIN"},
-		},
-	}
-}

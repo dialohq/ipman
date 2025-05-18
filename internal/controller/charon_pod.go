@@ -34,7 +34,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 	logger := log.FromContext(ctx)
 
 	charonPod := &corev1.Pod{}
-	err := r.Get(ctx, charonPodNsn(ipman.Name), charonPod)
+	err := r.Get(ctx, charonPodNsn(ipman.Spec.NodeName), charonPod)
 	if apierrors.IsNotFound(err) {
 		// charon pod doesn't exist
 
@@ -59,7 +59,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, secret *corev1.Se
 		return nil, nil, err
 	}
 
-	charonPod, err = waitForPodReady(charonPod, charonPodNsn(ipman.Name), r.Get)
+	charonPod, err = waitForPodReady(charonPod, charonPodNsn(ipman.Spec.NodeName), r.Get)
 	if err != nil {
 		logger.Error(err, "Error while waiting for charon pod to be ready")
 		return nil, nil, err
@@ -95,7 +95,7 @@ func (r *IpmanReconciler) createCharonPod(secret *corev1.Secret, ipman *ipmanv1.
 	path := os.Getenv("PROXY_SOCKET_PATH")
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      CharonPodName + "-" + ipman.Name,
+			Name:      CharonPodName + "-" + ipman.Spec.NodeName,
 			Namespace: "ims",
 			Labels: map[string]string{
 				"ipserviced": "true", // to get picked up by the service

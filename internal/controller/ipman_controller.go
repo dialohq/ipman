@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"maps"
 	"slices"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -49,6 +50,22 @@ func (r *IpmanReconciler) isReconcilingKindIpman(ctx context.Context, req reconc
 			return false, nil
 		}
 		return false, err
+	}
+	return true, nil
+} 
+
+func (r *IpmanReconciler) isReconcilingKindPod(ctx context.Context, req reconcile.Request) (bool, error){
+	pod := &corev1.Pod{}
+	err := r.Get(ctx, req.NamespacedName, pod) 
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if pod.GetDeletionTimestamp() != nil {
+		return false, nil
 	}
 	return true, nil
 } 
@@ -181,7 +198,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 	}
 
 	for _, c := range ipman.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP, ipman.Name)
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP, ipman.Spec.Name)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 			return err
@@ -198,6 +215,66 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 				return err
 			}
 		}
+	}
+
+	return nil
+}
+
+func (r *IpmanReconciler)reconcilePod(ctx context.Context, req reconcile.Request) error{
+	logger := log.FromContext(ctx)
+	
+	pod := &corev1.Pod{}
+	err := r.Get(ctx, req.NamespacedName, pod)
+	if err != nil {
+		return fmt.Errorf("error fetching reconciled pod: %w", err)
+	}
+
+	logger.Info("Waiting for pod to get assigned ip", "pod", pod.Name)
+	for pod.Status.PodIP == "" {
+		time.Sleep(1 * time.Second)
+		err = r.Get(ctx, req.NamespacedName, pod)
+		if err != nil {
+			return fmt.Errorf("Couldn't fetch pod while waiting for it's ip to add to bridge fdb: %w", err)
+		}
+	}
+	logger.Info("Pod got assigned ip", "pod", pod.Name, "ip", pod.Status.PodIP)
+
+	vxlanIp, ok := pod.Annotations["ipman.dialo.ai/vxlanIp"]
+	if !ok {
+		return fmt.Errorf("Annotation vxlanIp not present")
+	}
+	ifid, ok := pod.Annotations["ipman.dialo.ai/interfaceId"]
+	if !ok {
+		return fmt.Errorf("Annotation interfaceid not present")
+	}
+
+	ipman := &ipmanv1.Ipman{}
+	err = r.Get(
+		ctx,
+		types.NamespacedName{
+			Name: pod.Annotations["ipman.dialo.ai/ipmanName"],
+			Namespace: "",
+		},
+		ipman,
+	)
+	if err != nil {
+		return fmt.Errorf("Couldn't fetch pod while waiting for it's ip to add to bridge fdb: %w", err)
+	}
+
+	childName := pod.Annotations["ipman.dialo.ai/childName"]
+	url := fmt.Sprintf("http://%s:8080/addEntry", ipman.Status.XfrmGatewayIPs[childName])
+	resp, err := comms.SendPost(url, comms.BridgeFdbRequest{
+		CiliumIp: pod.Status.PodIP,
+		VxlanIp: vxlanIp,
+		InterfaceId: ifid,
+	})
+
+	if err != nil {
+		return fmt.Errorf("Couldn't send post request to add bridge fdb entry for pod: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Response status code from bridge fdb is not 200: %d", resp.StatusCode)
 	}
 
 	return nil
@@ -226,29 +303,35 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	}
 
 	for _, im := range iml.Items {
-		ipman := &ipmanv1.Ipman{}
-		err := r.Get(ctx,types.NamespacedName{
-			Namespace: im.Namespace,
-			Name: im.Name,
-		} ,ipman)
-		rq, err = r.updateIpmanStatus(ipman, ctx)
-		if err != nil {
-			logger.Error(err, "Error creating free ip list to change status")
-			return res(rq), err
-		}
-		err = r.Status().Update(ctx, ipman)
-		if err != nil {
-			logger.Error(err, "Couldn't update ipman status")
-			return res(rq), err
+		success := false
+		for !success {
+			success = true
+			ipman := &ipmanv1.Ipman{}
+			err := r.Get(ctx,types.NamespacedName{
+				Namespace: im.Namespace,
+				Name: im.Name,
+			} ,ipman)
+			rq, err = r.updateIpmanStatus(ipman, ctx)
+			if err != nil {
+				logger.Error(err, "Couldn't create free ip list to change status")
+				success = false
+			}
+			err = r.Status().Update(ctx, ipman)
+			if err != nil {
+				logger.Error(err, "Couldn't update ipman status")
+				success = false
+			}
 		}
 	}
 
 	isIpman, err := r.isReconcilingKindIpman(ctx, req)
 	if err != nil {
 		logger.Error(err, "Error checking kind of reconciled object")
+		return res(rq), err
 	}
 
 	if isIpman {
+		logger.Info("Reconciling ipman")
 		err := r.reconcileIpman(ctx, req)
 		if err != nil {
 			return res(rq, time.Second * 10), nil
@@ -256,71 +339,45 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		return res(rq), nil
 	}
 
-	pod := &corev1.Pod{}
-	err = r.Get(ctx, req.NamespacedName, pod)
+	isPod, err := r.isReconcilingKindPod(ctx, req)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			logger.Info("Reconciled pod not found, deleted")
-			return res(nil), nil
-		}
-		logger.Error(err, "error fetching reconciled pod")
+		logger.Error(err, "Couldn't check kind of reconciled object")
 		return res(rq), err
 	}
-
-	logger.Info("Waiting for pod to get assigned ip")
-	for pod.Status.PodIP == "" {
-		time.Sleep(1 * time.Second)
-		err = r.Get(ctx, req.NamespacedName, pod)
+	if isPod {
+		logger.Info("Reconciling pod")
+		err := r.reconcilePod(ctx, req)
 		if err != nil {
-			logger.Error(err, "Couldn't fetch pod while waiting for it's ip to add to bridge fdb")
+			logger.Error(err, "Error reconciling pod")
 			return res(rq), err
 		}
-	}
-	logger.Info("Pod got assigned ip", "ip", pod.Status.PodIP)
-
-	vxlanIp, ok := pod.Annotations["ipman.dialo.ai/vxlanIp"]
-	if !ok {
-		logger.Info("Annotation vxlanIp not present")
-		return res(rq), nil
-	}
-	ifid, ok := pod.Annotations["ipman.dialo.ai/interfaceId"]
-	if !ok {
-		logger.Info("Annotation interfaceid not present")
 		return res(rq), nil
 	}
 
-	ipman := &ipmanv1.Ipman{}
-	err = r.Get(
-		ctx,
-		types.NamespacedName{
-			Name: pod.Annotations["ipman.dialo.ai/ipmanName"],
-			Namespace: "",
-		},
-		ipman,
-	)
-	if err != nil {
-		logger.Error(err, "Error fetching ipman instance while reconciling pod")
-		return res(rq), err
+	logger.Info("Reconciling deletion")
+	// something deleted
+	if len(iml.Items) == 0 {
+		pods := &corev1.PodList{}
+		err = r.List(ctx, pods)
+		for _, p := range pods.Items {
+			if p.Namespace == "ims" {
+				if val, ok := p.Annotations["ipman.dialo.ai/childName"]; ok && val != ""{
+					err = r.Delete(ctx, &p)
+					if err != nil {
+						logger.Error(err, "Error deleting pod since there are no ipmen", "podname", p.Name)
+					}
+				}
+				s := strings.Split(p.Name, "-")
+				if s[0] == "charon" && s[1] == "pod" && p.Namespace == "ims" {
+					err = r.Delete(ctx, &p)
+					if err != nil {
+						logger.Error(err, "Error deleting charon pod since there are no ipmen", "podname", p.Name)
+					}
+				}
+				
+			}
+		}
 	}
-
-	childName := pod.Annotations["ipman.dialo.ai/childName"]
-	url := fmt.Sprintf("http://%s:8080/addEntry", ipman.Status.XfrmGatewayIPs[childName])
-	resp, err := comms.SendPost(url, comms.BridgeFdbRequest{
-		CiliumIp: pod.Status.PodIP,
-		VxlanIp: vxlanIp,
-		InterfaceId: ifid,
-	})
-
-	if err != nil {
-		logger.Error(err, "Couldn't send post request to add bridge fdb entry for pod", "pod", pod.Name)
-		return res(rq), nil
-	}
-
-	if resp.StatusCode != 200 {
-		logger.Error(err, "Response status code from bridge fdb is not 200", "pod", pod.Name, "code", resp.StatusCode)
-		return res(rq), nil
-	}
-
 	return res(rq), nil
 }
 
@@ -333,7 +390,7 @@ var annotationPredicate = predicate.Funcs{
 		return hasIpmanAnnotation(e.ObjectNew)
 	},
 	DeleteFunc: func(e event.DeleteEvent) bool {
-		return hasIpmanAnnotation(e.Object)
+		return hasIpmanAnnotation(e.Object) && e.Object.GetNamespace() != "ims"
 	},
 	GenericFunc: func(e event.GenericEvent) bool {
 		return hasIpmanAnnotation(e.Object)

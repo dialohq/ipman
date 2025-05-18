@@ -301,3 +301,18 @@ func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]stri
 
 	return out
 }
+
+// TODO: this is more or less duplicated in ipman_controller.go
+func createNetAdminSecurityContext() *corev1.SecurityContext {
+	privEsc := false
+	return &corev1.SecurityContext{
+		SeccompProfile: &corev1.SeccompProfile{
+			Type: corev1.SeccompProfileTypeRuntimeDefault,
+		},
+
+		AllowPrivilegeEscalation: &privEsc,
+		Capabilities: &corev1.Capabilities{
+			Add: []corev1.Capability{"NET_ADMIN"},
+		},
+	}
+}

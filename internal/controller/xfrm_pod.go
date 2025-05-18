@@ -150,6 +150,7 @@ func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string, connNa
 				"ipman.dialo.ai/xfrm": connName,
 			},
 			Annotations: map[string]string{
+				"ipman.dialo.ai/ipmanName": connName,
 				"ipman.dialo.ai/childName": c.Name,
 				"ipman.dialo.ai/vxlanip": c.VxlanIP,
 				"ipman.dialo.ai/xfrmip": c.XfrmIP,

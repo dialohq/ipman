@@ -49,6 +49,7 @@ deploy:
 		-f ipman.yaml                             \
 		-f ipman-controller-service.yaml          \
 		-f mutating_webhook.yaml                  \
+		-f validating_webhook.yaml                \
 		-f network_policy.yaml
 
 	kubectl create secret tls webhook-server-cert \
@@ -56,8 +57,8 @@ deploy:
 		--key certs/server-key.pem                \
 		-n ims --dry-run=client -o yaml | kubectl apply -f -
 
-	kubectl apply -f samples/ipman.yaml           \
-		-f config/controller_deployment.yaml
+	kubectl apply -f config/controller_deployment.yaml \
+		-f samples/ipman.yaml
 
 clean:
 	-cd config && kubectl delete                   \
@@ -67,6 +68,7 @@ clean:
 		-f webhook_service.yaml                    \
 		-f ipman.yaml                              \
 		-f mutating_webhook.yaml                   \
+		-f validating_webhook.yaml                 \
 		-f ipman-controller-service.yaml           \
 		-f namespace.yaml || true
 
