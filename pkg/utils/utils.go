@@ -1,15 +1,14 @@
 package utils
 
 import (
-	"os"
-	"log/slog"
-	"regexp"
-	"net/http"
-	"fmt"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	admissionv1 "k8s.io/api/admission/v1"
-
+	"log/slog"
+	"net/http"
+	"os"
+	"regexp"
 )
 
 func Fatal(err error, l *slog.Logger, message string, args ...any) {

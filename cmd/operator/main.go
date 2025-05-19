@@ -49,11 +49,11 @@ func main() {
 
 	logger.Info("New webhook")
 	whServer := webhook.NewServer(webhook.Options{
-		Port: 8443,
+		Port:    8443,
 		CertDir: "/etc/webhook/certs",
 	})
 
-	if err = mgr.Add(whServer); err != nil{
+	if err = mgr.Add(whServer); err != nil {
 		logger.Error(err, "Error registering wh server with the manager")
 		os.Exit(1)
 	}
@@ -62,7 +62,7 @@ func main() {
 		Client: mgr.GetClient(),
 		Config: *mgr.GetConfig(),
 	}
-	vwh := ipmanwhv1.ValidatingWebhookHandler {
+	vwh := ipmanwhv1.ValidatingWebhookHandler{
 		Client: mgr.GetClient(),
 		Config: *mgr.GetConfig(),
 	}

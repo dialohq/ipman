@@ -5,14 +5,74 @@ import (
 )
 
 type IpmanSpec struct {
-	Name       string    `json:"name"`
-	RemoteAddr string    `json:"remoteAddr"`
-	LocalAddr  string    `json:"localAddr"`
-	LocalId    string    `json:"localId"`
-	RemoteId   string    `json:"remoteId"`
-	SecretRef  SecretRef `json:"secretRef"`
-	Children   []Child   `json:"children"`
-	NodeName   string    `json:"nodeName"`
+	Name       string           `json:"name"`
+	RemoteAddr string           `json:"remoteAddr"`
+	LocalAddr  string           `json:"localAddr"`
+	LocalId    string           `json:"localId"`
+	RemoteId   string           `json:"remoteId"`
+	SecretRef  SecretRef        `json:"secretRef"`
+	Children   map[string]Child `json:"children"`
+	NodeName   string           `json:"nodeName"`
+}
+
+type ConnData struct {
+	Secret string
+	Ipman  Ipman
+}
+
+func (v *IpmanSpec) SerializeAllToConf(data []ConnData) string {
+	conns := ""
+	secrets := ""
+	for _, d := range data {
+		serializedChildren := ""
+		for _, child := range d.Ipman.Spec.Children {
+			serializedChildren += child.SerializeToConf()
+		}
+		conns += fmt.Sprintf(`%s {
+		remote_addrs = %s
+		local_addrs = %s
+		local {
+			auth = psk
+			id = %s
+		}
+		remote {
+			auth = psk
+			id = %s
+		}
+		children {
+			%s
+		}
+		version = 2
+		proposals = aes256-sha256-ecp256
+	}
+`,
+			d.Ipman.Spec.Name,
+			d.Ipman.Spec.RemoteAddr,
+			d.Ipman.Spec.LocalAddr,
+			d.Ipman.Spec.LocalId,
+			d.Ipman.Spec.RemoteId,
+			serializedChildren,
+		)
+		secrets += fmt.Sprintf(`
+	ike-%s {
+		secret = "%s"
+		local-id = %s
+		remote-id = %s
+	}
+`,
+			d.Ipman.Spec.Name,
+			d.Secret,
+			d.Ipman.Spec.LocalId,
+			d.Ipman.Spec.RemoteId)
+	}
+
+	return fmt.Sprintf(`
+connections {
+	%s
+}
+secrets {
+	%s
+}`, conns, secrets)
 }
 
 func (v *IpmanSpec) SerializeToConf(secret string) string {
@@ -47,16 +107,16 @@ secrets {
 		remote-id = %s
 	}
 }`,
-	v.Name,
-	v.RemoteAddr,
-	v.LocalAddr,
-	v.LocalId,
-	v.RemoteId,
-	serializedChildren,
-	v.Name,
-	secret,
-	v.LocalId,
-	v.RemoteId)
+		v.Name,
+		v.RemoteAddr,
+		v.LocalAddr,
+		v.LocalId,
+		v.RemoteId,
+		serializedChildren,
+		v.Name,
+		secret,
+		v.LocalId,
+		v.RemoteId)
 	return conf
 }
 

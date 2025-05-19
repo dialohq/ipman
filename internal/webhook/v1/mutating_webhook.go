@@ -3,12 +3,12 @@ package v1
 import (
 	"context"
 	"encoding/json"
-	"strings"
 	"fmt"
 	"math/rand"
 	"net/http"
 	"slices"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -24,7 +24,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type MutatingWebhookHandler struct{
+type MutatingWebhookHandler struct {
 	Client client.Client
 	Config rest.Config
 }
@@ -32,10 +32,11 @@ type MutatingWebhookHandler struct{
 // For dry run, we don't want side effects
 // so creating a lease is off the table
 type dummyLocker struct{}
-func (dl *dummyLocker) Lock(){}
-func (dl *dummyLocker) Unlock(){}
 
-func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
+func (dl *dummyLocker) Lock()   {}
+func (dl *dummyLocker) Unlock() {}
+
+func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 
 	in, err := u.ParseRequest(*r)
@@ -45,15 +46,15 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		writeResponseDenied(w, in)
 		return
 	}
-	logger := log.FromContext(ctx,"webhook", true, "PodName", in.Request.Name)
+	logger := log.FromContext(ctx, "webhook", true, "PodName", in.Request.Name)
 	isDryRun := false
 	if in.Request.DryRun != nil && *in.Request.DryRun == true {
-		isDryRun = true;
+		isDryRun = true
 	}
 
-	if(in.Request.Kind.Kind != "Pod") {
+	if in.Request.Kind.Kind != "Pod" {
 		writeResponseNoPatch(w, in)
-		return 
+		return
 	}
 	var pod corev1.Pod
 	json.Unmarshal(in.Request.Object.Raw, &pod)
@@ -62,8 +63,8 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	poolName, poolOk := pod.Annotations["ipman.dialo.ai/poolName"]
 	if !(childOk && connOk && poolOk) {
 		writeResponseNoPatch(w, in)
-		return 
-	} 
+		return
+	}
 
 	clientSet, err := kubernetes.NewForConfig(&wh.Config)
 	if err != nil {
@@ -81,8 +82,8 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		// it errors with "Already exists".
 		// This is a rough work around.
 		for {
-			locker, err = k8slock.NewLocker("ipman-" + connName + "-lease-lock",
-				k8slock.TTL(5 * time.Second),
+			locker, err = k8slock.NewLocker("ipman-"+connName+"-lease-lock",
+				k8slock.TTL(5*time.Second),
 				k8slock.Namespace("ims"),
 				k8slock.Clientset(clientSet),
 			)
@@ -93,7 +94,7 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 			if errors.IsAlreadyExists(err) {
 				n := ((rand.Int() % 10) + 1) * 100
 				logger.Info("Lease already exists, sleeping randomly", "time", n)
-				time.Sleep(time.Duration(n) * time.Millisecond )
+				time.Sleep(time.Duration(n) * time.Millisecond)
 			} else {
 				logger.Error(err, "Couldn't create a lease locker instance")
 				writeResponseDenied(w, in)
@@ -108,12 +109,11 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	ipman := &ipmanv1.Ipman{}
 	nsn := types.NamespacedName{
 		Namespace: "",
-		Name: connName,
+		Name:      connName,
 	}
 	err = wh.Client.Get(ctx, nsn, ipman)
 	if err != nil {
-		fmt.Println("Couldn't find a matching connection, aborting", err)
-		writeResponseDenied(w, in)
+		writeResponseDenied(w, in, "Couldn't fetch ipman")
 		return
 	}
 
@@ -126,36 +126,36 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	}
 
 	if ipmanChild == nil {
-		fmt.Println("Couldn't find a matching child, aborting\n", "children:", ipman.Spec.Children)
-		writeResponseDenied(w, in)
+		writeResponseDenied(w, in, "Couldn't find a matching child")
 		return
-		
 	}
 
 	if len(ipman.Status.FreeIPs[ipmanChild.Name][poolName]) == 0 {
-			logger.Info("There are no free IP addresses for requested child. Denying request for pod.\n","child", ipmanChild.Name, "status", ipman.Status)
-			writeResponseDenied(w, in)
-			return
+		logger.Info("There are no free IP addresses for requested child. Denying request for pod.\n", "child", ipmanChild.Name, "status", ipman.Status)
+		writeResponseDenied(w, in)
+		return
 	}
 
 	pool, ok := ipman.Status.FreeIPs[ipmanChild.Name][poolName]
 	if !ok {
-		logger.Error(fmt.Errorf("Error, couldn't find pool"),"Pool not found in ipman" ,"annotations", pod.Annotations["ipman.dialo.ai/poolName"], "child", ipmanChild.Name, "ipman", ipman.Name)
+		logger.Error(fmt.Errorf("Error, couldn't find pool"), "Pool not found in ipman", "annotations", pod.Annotations["ipman.dialo.ai/poolName"], "child", ipmanChild.Name, "ipman", ipman.Name)
 		writeResponseDenied(w, in)
 		return
 	}
 
 	// TODO: change type of spec.children to a map instead of list
-	out, _ := json.Marshal(ipmanChild.RemoteIps)
-	annotations := map[string]string {
-		"ipman.dialo.ai/vxlanIp": pool[0],
-		"ipman.dialo.ai/xfrmIp": ipmanChild.XfrmIP,
+	remoteJson, _ := json.Marshal(ipmanChild.RemoteIps)
+	localJson, _ := json.Marshal(ipmanChild.LocalIps)
+	annotations := map[string]string{
+		"ipman.dialo.ai/vxlanIp":     pool[0],
+		"ipman.dialo.ai/xfrmIp":      ipmanChild.XfrmIP,
 		"ipman.dialo.ai/interfaceId": strconv.FormatInt(int64(ipmanChild.XfrmIfId), 10),
-		// TODO: find out if the remote ip being added or removed
+		// TODO: find remoteJson if the remote ip being added or removed
 		// affects this pod and restart it then??
 		// maybe annotation on creation if not present
 		// always restarted
-		"ipman.dialo.ai/remoteIps": string(out),
+		"ipman.dialo.ai/remoteIps":        string(remoteJson),
+		"ipman.dialo.ai/localIps":         string(localJson),
 		"ipman.dialo.ai/xfrmUnderlyingIp": ipman.Status.XfrmGatewayIPs[ipmanChild.Name],
 	}
 	ip := pool[0]
@@ -165,7 +165,7 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 		ipman.Status.PendingIPs = map[string]string{}
 	}
 	ipman.Status.PendingIPs[ip] = time.Now().Format(time.Layout)
-	if !isDryRun{
+	if !isDryRun {
 		err = wh.Client.Status().Update(ctx, ipman)
 		if err != nil {
 			logger.Error(err, "Couldn't update status of ipman in webhook")
@@ -180,38 +180,38 @@ func(wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reques
 	if err != nil {
 		println("Error marshalling response: ", err)
 	}
-	
+
 	w.Header().Add("Content-Type", "application/json")
 	w.Write(respJson)
 }
 
-func initContainer(child ipmanv1.Child, gateway string, ip string) *corev1.Container{
+func initContainer(child ipmanv1.Child, gateway string, ip string) *corev1.Container {
 	remoteIps := strings.Join(child.RemoteIps, ",")
 	return &corev1.Container{
-		Name: "iface-request",
-		Image: "plan9better/vxlandlord:latest",
+		Name:            "iface-request",
+		Image:           "plan9better/vxlandlord:latest",
 		ImagePullPolicy: corev1.PullAlways,
 		SecurityContext: createNetAdminSecurityContext(),
 		// TODO: as a config map
 		Env: []corev1.EnvVar{
 			{
-				Name: "VXLAN_IP",
+				Name:  "VXLAN_IP",
 				Value: ip,
 			},
 			{
-				Name: "XFRM_GATEWAY_IP",
+				Name:  "XFRM_GATEWAY_IP",
 				Value: gateway,
 			},
 			{
-				Name: "INTERFACE_ID",
+				Name:  "INTERFACE_ID",
 				Value: strconv.FormatInt(int64(child.XfrmIfId), 10),
 			},
 			{
-				Name: "XFRM_IP",
+				Name:  "XFRM_IP",
 				Value: child.XfrmIP,
 			},
 			{
-				Name: "REMOTE_IPS",
+				Name:  "REMOTE_IPS",
 				Value: remoteIps,
 			},
 		},
@@ -219,9 +219,9 @@ func initContainer(child ipmanv1.Child, gateway string, ip string) *corev1.Conta
 }
 
 type jsonPatch struct {
-	Op string `json:"op"`
-	Path string `json:"path"`
-	Value any `json:"value"`
+	Op    string `json:"op"`
+	Path  string `json:"path"`
+	Value any    `json:"value"`
 }
 
 func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
@@ -245,38 +245,38 @@ func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
 	return patch
 }
 
-func createAnnotationPatch(annotations map[string]string)[]jsonPatch{
+func createAnnotationPatch(annotations map[string]string) []jsonPatch {
 	patches := []jsonPatch{}
 	for key, value := range annotations {
 		// replace '/' with '~1' which jsonPatch replaces back to '/'
 		processedKey := strings.Replace(key, "/", "~1", 1)
 		patches = append(patches, jsonPatch{
-			Op: "add",
-			Path: "/metadata/annotations/" + processedKey,
+			Op:    "add",
+			Path:  "/metadata/annotations/" + processedKey,
 			Value: value,
 		})
 	}
 	return patches
 }
 
-func createInitContainerPatch(p *corev1.Pod,child ipmanv1.Child, gateway string, ip string) *jsonPatch {
+func createInitContainerPatch(p *corev1.Pod, child ipmanv1.Child, gateway string, ip string) *jsonPatch {
 	if len(p.Spec.InitContainers) == 0 {
 		return &jsonPatch{
-			Op: "add",
-			Path: "/spec/initContainers",
+			Op:    "add",
+			Path:  "/spec/initContainers",
 			Value: []corev1.Container{*initContainer(child, gateway, ip)},
 		}
 	}
 	return &jsonPatch{
-		Op: "add",
-		Path: "/spec/initContainers/-",
+		Op:    "add",
+		Path:  "/spec/initContainers/-",
 		Value: *initContainer(child, gateway, ip),
 	}
 }
 
 func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]string, child ipmanv1.Child) []byte {
 	patch := []jsonPatch{}
-	
+
 	ap := createAnnotationPatch(annotations)
 	if ap == nil {
 		fmt.Println("Error creating annotation patch. Annotations:", p.ObjectMeta.Annotations)

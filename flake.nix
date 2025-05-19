@@ -63,6 +63,7 @@
             tokei # loc count
             dockerfile-language-server-nodejs
             yaml-language-server
+            yamlfmt
             kuttl # kubernetes tests
           ];
           shellHook = ''

@@ -118,10 +118,11 @@ func (in *IpmanSpec) DeepCopyInto(out *IpmanSpec) {
 	*out = *in
 	out.SecretRef = in.SecretRef
 	if in.Children != nil {
-		in, out := &in.Children, &out.Children
-		*out = make([]Child, len(*in))
-		for i := range *in {
-			(*in)[i].DeepCopyInto(&(*out)[i])
+		out.Children = make(map[string]Child, len(in.Children))
+		for key, val := range in.Children {
+			var outVal Child
+			val.DeepCopyInto(&outVal)
+			out.Children[key] = outVal
 		}
 	}
 }

@@ -3,14 +3,12 @@ package controller
 import (
 	"context"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	"log/slog"
-	"time"
 	"os"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-
+	"time"
 )
 
 // rke2 requires seccomp profile set to runtime default or localhost
@@ -19,7 +17,7 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 	// container require what and make
 	// this more specific. charon pod
 	// needs to run as root to load
-	// plugins 
+	// plugins
 	privEsc := false
 	return &corev1.SecurityContext{
 		SeccompProfile: &corev1.SeccompProfile{
@@ -33,7 +31,7 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 	}
 }
 
-func (r *IpmanReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext{
+func (r *IpmanReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext {
 	def := r.createDefaultSecurityContext()
 	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"}
 	return def
@@ -45,26 +43,25 @@ func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContex
 	return def
 }
 
-
 func waitForPodReady(pod *corev1.Pod,
-					 nsn types.NamespacedName,
-					 get func(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error)(*corev1.Pod, error){
+	nsn types.NamespacedName,
+	get func(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error) (*corev1.Pod, error) {
 
 	ctx := context.Background()
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
-	for pod.Status.Phase != "Running"{
+	for pod.Status.Phase != "Running" {
 		err := get(ctx, nsn, pod)
 		if err != nil {
-			logger.Error("Error fetching charon pod while checking for container readiness", "msg", err, "pod", pod.Name,)
+			logger.Error("Error fetching charon pod while checking for container readiness", "msg", err, "pod", pod.Name)
 		}
 		time.Sleep(1 * time.Second)
 	}
 
 	for pod.Status.PodIP == "" {
 		err := get(ctx, nsn, pod)
-		if err != nil && !apierrors.IsNotFound(err){
+		if err != nil && !apierrors.IsNotFound(err) {
 			logger.Error("Error fetching charon pod while waiting for ip allocation", "msg", err)
 			return nil, err
 		}
@@ -72,4 +69,3 @@ func waitForPodReady(pod *corev1.Pod,
 	}
 	return pod, nil
 }
-

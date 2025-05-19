@@ -1,21 +1,22 @@
 package controller
 
 import (
-	"strings"
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"strconv"
-	"errors"
-	"encoding/json"
-	"k8s.io/apimachinery/pkg/types"
 	"net/http"
-	"context"
+	"strconv"
+	"strings"
+
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
@@ -28,16 +29,17 @@ func xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
 
 	return types.NamespacedName{
 		Namespace: ns,
-		Name: podName,
+		Name:      podName,
 	}
 }
 
-func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName string) (*corev1.Pod, error){
+func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName string) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	xfrmPod := &corev1.Pod{}
 
 	err := r.Get(ctx, xfrmPodNsn(c.Name, connName), xfrmPod)
+	xfrmUrl := ""
 	if apierrors.IsNotFound(err) {
 
 		xfrmPod = r.createXfrmPod(c, nodeName, connName)
@@ -45,13 +47,13 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
 		}
-		
+
 		xfrmPod, err = waitForPodReady(xfrmPod, xfrmPodNsn(c.Name, connName), r.Get)
 		if err != nil {
 			logger.Error(err, "Error waiting for xfrm pod to be ready", "pod", xfrmPod.Name)
 			return nil, err
 		}
-		
+
 		resp, err := http.Get(fmt.Sprintf("http://%s:8080/pid", xfrmPod.Status.PodIP))
 		if err != nil {
 			logger.Error(err, "Couldn't request PID from xfrm pod", "xfrm-pod", xfrmPod.Name)
@@ -79,15 +81,15 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 
 		xfrmRequest := comms.XfrmRequestData{
 			XfrmIfId: c.XfrmIfId,
-			PID: prd.Pid,
+			PID:      prd.Pid,
 		}
 
 		charonUrl := fmt.Sprintf("http://%s", charonPodIp)
-		resp, err = comms.SendPost(charonUrl + "/xfrm", xfrmRequest)
+		resp, err = comms.SendPost(charonUrl+"/xfrm", xfrmRequest)
 
 		if err != nil {
 			logger.Error(err, "Couldn't send request for xfrm interface")
-			return nil, err 
+			return nil, err
 		}
 
 		defer resp.Body.Close()
@@ -109,8 +111,8 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 			return nil, err
 		}
 
-		xfrmUrl := fmt.Sprintf("http://%s:8080", xfrmPod.Status.PodIP)
-		resp, err = comms.SendPost(xfrmUrl + "/addRoutes", c)
+		xfrmUrl = fmt.Sprintf("http://%s:8080", xfrmPod.Status.PodIP)
+		resp, err = comms.SendPost(xfrmUrl+"/addRoutes", c)
 		if err != nil {
 			logger.Error(err, "Error sending post to /addRoutes in xfrm pod", "child", c, "pod", xfrmPod)
 			return nil, err
@@ -127,21 +129,46 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 		return nil, err
 	}
 
-	ripjson, _ := json.Marshal(c.RemoteIps)
-	a := xfrmPod.Annotations
-	stillValid := true
-	stillValid = stillValid && a["ipman.dialo.ai/childName"] == c.Name
-	stillValid = stillValid && a["ipman.dialo.ai/vxlanip"] == c.VxlanIP
-	stillValid = stillValid && a["ipman.dialo.ai/xfrmip"] == c.XfrmIP
-	stillValid = stillValid && a["ipman.dialo.ai/remoteips"] == string(ripjson)
-	stillValid = stillValid && a["ipman.dialo.ai/xfrmid"] == strconv.FormatInt(int64(c.XfrmIfId), 10)
+	// if xfrmPod.Status.PodIP == "" {
+	// 	xfrmPod, err = waitForPodReady(xfrmPod, xfrmPodNsn(c.Name, connName), r.Get)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("Error waiting for pod to be ready while updating routes in xfrm pod: %w", err)
+	// 	}
+	// }
+	// xfrmUrl = fmt.Sprintf("http://%s:8080", xfrmPod.Status.PodIP)
+	// podLocalIps := []string{}
+	// ipmanLocalIps := slices.Clone(c.LocalIps)
+	// err = json.Unmarshal([]byte(xfrmPod.Annotations["ipman.dialo.ai/localIps"]), &podLocalIps)
+	// if err != nil {
+	// 	return nil, fmt.Errorf("Couldn't unmarshal xfrm pod local ips annotation: %w", err)
+	// }
+	// if !reflect.DeepEqual(podLocalIps, ipmanLocalIps) {
+	// 	missingIps := slices.DeleteFunc(ipmanLocalIps, func(ip string) bool {
+	// 		return slices.Contains(podLocalIps, ip)
+	// 	})
+	// 	logger.Info("sending post to xfrm to update routes", "xfrmurl", xfrmUrl)
+	// 	resp, err := comms.SendPost(xfrmUrl+"/addRoutes", missingIps)
+	// 	if err != nil {
+	// 		return nil, fmt.Errorf("Couldn't marshal array of local ips to add to xfrm pod routes: %w", err)
+	// 	}
+
+	// 	if resp.StatusCode != 200 {
+	// 		out, err := io.ReadAll(resp.Body)
+	// 		if err != nil {
+	// 			return nil, fmt.Errorf("Error adding routes to xfrm pod(status code not 200, is %d) error unmarshaling response body: %w", resp.StatusCode, err)
+	// 		}
+
+	// 		return nil, fmt.Errorf("Error adding routes to xfrm pod(status code not 200, is %d) body: %s", resp.StatusCode, string(out))
+	// 	}
+	// }
 
 	return xfrmPod, nil
 
 }
 
-func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string, connName string) (*corev1.Pod) {
+func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connName string) *corev1.Pod {
 	remoteIpsJSON, _ := json.Marshal(c.RemoteIps)
+	// localIpsJSON, _ := json.Marshal(c.LocalIps)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      XfrmPodName + "-" + c.Name + "-" + connName,
@@ -152,10 +179,11 @@ func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string, connNa
 			Annotations: map[string]string{
 				"ipman.dialo.ai/ipmanName": connName,
 				"ipman.dialo.ai/childName": c.Name,
-				"ipman.dialo.ai/vxlanip": c.VxlanIP,
-				"ipman.dialo.ai/xfrmip": c.XfrmIP,
+				"ipman.dialo.ai/vxlanip":   c.VxlanIP,
+				"ipman.dialo.ai/xfrmip":    c.XfrmIP,
+				// "ipman.dialo.ai/localIps":  string(localIpsJSON),
 				"ipman.dialo.ai/remoteips": string(remoteIpsJSON),
-				"ipman.dialo.ai/xfrmid": strconv.FormatInt(int64(c.XfrmIfId), 10),
+				"ipman.dialo.ai/xfrmid":    strconv.FormatInt(int64(c.XfrmIfId), 10),
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -163,31 +191,31 @@ func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string, connNa
 				"kubernetes.io/hostname": nodeName,
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
-			HostPID: true,
+			HostPID:       true,
 			SecurityContext: &corev1.PodSecurityContext{
 				Sysctls: []corev1.Sysctl{
 					{
-						Name: "net.ipv4.ip_forward",
+						Name:  "net.ipv4.ip_forward",
 						Value: "1",
 					},
 					{
-						Name: "net.ipv4.conf.all.rp_filter",
+						Name:  "net.ipv4.conf.all.rp_filter",
 						Value: "0",
 					},
 					{
-						Name: "net.ipv4.conf.default.rp_filter",
+						Name:  "net.ipv4.conf.default.rp_filter",
 						Value: "0",
 					},
 					{
-						Name: "net.ipv4.conf.all.arp_filter",
+						Name:  "net.ipv4.conf.all.arp_filter",
 						Value: "1",
 					},
 				},
 			},
 			Containers: []corev1.Container{
 				{
-					Name: "xfrm-container", 
-					Image: "plan9better/xfrminion:latest",
+					Name:            "xfrm-container",
+					Image:           "plan9better/xfrminion:latest",
 					ImagePullPolicy: corev1.PullAlways,
 					SecurityContext: r.createNetAdminSecurityContext(),
 					LivenessProbe: &corev1.Probe{
@@ -203,4 +231,3 @@ func (r *IpmanReconciler)createXfrmPod(c *ipmanv1.Child, nodeName string, connNa
 		},
 	}
 }
-

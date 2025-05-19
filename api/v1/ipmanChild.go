@@ -5,7 +5,9 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"sort"
+	"maps"
+	"reflect"
+	"slices"
 	"strings"
 )
 
@@ -20,10 +22,21 @@ type Child struct {
 	VxlanIP   string              `json:"vxlan_ip"`
 }
 
-func (c *Child)HashSum() string {
+func (c *Child) HashSum() string {
 	out, _ := json.Marshal(c)
 	hash := sha256.Sum256(out)
 	return hex.EncodeToString(hash[:])
+}
+
+func (c *Child) EqualExceptChangable(c2 Child) bool {
+	c_copy := c.DeepCopy()
+	c2_copy := c2.DeepCopy()
+	c_copy.IpPools = nil
+	c2_copy.IpPools = nil
+	c_copy.LocalIps = nil
+	c2_copy.LocalIps = nil
+
+	return reflect.DeepEqual(c_copy, c2_copy)
 }
 
 func (c *Child) SerializeToConf() string {
@@ -46,32 +59,23 @@ func (c *Child) SerializeToConf() string {
 	return conf
 }
 
-func childrenEqual(a, b []Child) bool {
-	if len(a) != len(b) {
+func childrenEqual(a, b map[string]Child) bool {
+	keys_a := slices.Collect(maps.Keys(a))
+	slices.Sort(keys_a)
+	keys_b := slices.Collect(maps.Keys(b))
+	slices.Sort(keys_b)
+
+	if len(keys_a) != len(keys_b) {
 		return false
 	}
 
-	// order independent
-	sort.Slice(a, func(i, j int) bool {
-		return a[i].Name < a[j].Name
-	})
-	sort.Slice(b, func(i, j int) bool {
-		return b[i].Name < b[j].Name
-	})
+	if !reflect.DeepEqual(keys_a, keys_b) {
+		return false
+	}
 
-	for i := range a {
-		if a[i].Name != b[i].Name {
+	for k, v := range a {
+		if !reflect.DeepEqual(v, b[k]) {
 			return false
-		}
-		for j := range a[i].LocalIps {
-			if a[i].LocalIps[j] != b[i].LocalIps[j] {
-				return false
-			}
-		}
-		for j := range a[i].RemoteIps{
-			if a[i].RemoteIps[j] != b[i].RemoteIps[j] {
-				return false
-			}
 		}
 	}
 	return true

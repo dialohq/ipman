@@ -135,6 +135,28 @@ func writeErrorNotNil(w http.ResponseWriter, err error) {
 	}
 }
 
+func updateRoutes(w http.ResponseWriter, r *http.Request) {
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(h)
+
+	defer r.Body.Close()
+	out, err := io.ReadAll(r.Body)
+	if err != nil {
+		logger.Error("Error reading body of reqeust for adding routes", "msg", err, "request", *r)
+		writeError(w, err, nil)
+		return
+	}
+
+	localIps := []string{}
+	err = json.Unmarshal(out, localIps)
+	if err != nil {
+		logger.Error("Error unmarshalling body of request for adding routes", "msg", err, "request", *r)
+		writeError(w, err, nil)
+		return
+	}
+
+}
+
 func addRoutes(w http.ResponseWriter, r *http.Request) {
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)

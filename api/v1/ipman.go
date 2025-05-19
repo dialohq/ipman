@@ -16,12 +16,11 @@ func secretRefEqual(a, b SecretRef) bool {
 		a.Key == b.Key
 }
 
-
 type IpmanStatus struct {
 	XfrmGatewayIPs map[string]string              `json:"xfrmGatewayIp"`
-	FreeIPs       map[string]map[string][]string `json:"freeIps"`
-	PendingIPs       map[string]string `json:"pendingIps"`
-	CharonProxyIP string `json:"charonProxyIp"`
+	FreeIPs        map[string]map[string][]string `json:"freeIps"`
+	PendingIPs     map[string]string              `json:"pendingIps"`
+	CharonProxyIP  string                         `json:"charonProxyIp"`
 }
 
 type Ipman struct {
@@ -32,7 +31,6 @@ type Ipman struct {
 	Status IpmanStatus `json:"status,omitempty"`
 }
 
-// +kubebuilder:object:root=true
 type IpmanList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`

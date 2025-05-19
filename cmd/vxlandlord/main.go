@@ -111,7 +111,7 @@ func main() {
 	u.Fatal(err, logger, "Error appending to bridge fdb")
 
 	dstWithFullMask := net.IPNet{IP: xfrm_ipnet.IP, Mask: net.CIDRMask(32, 32)}
-	r := &ip.Route {
+	r := &ip.Route{
 		LinkIndex: (*vxlan).Attrs().Index,
 		Dst:       &dstWithFullMask,
 		Src:       vxlan_ipnet.IP,

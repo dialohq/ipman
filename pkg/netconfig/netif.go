@@ -3,9 +3,9 @@ package netconfig
 import (
 	"fmt"
 	ip "github.com/vishvananda/netlink"
-	"strings"
-	"strconv"
 	"net"
+	"strconv"
+	"strings"
 )
 
 func FindDefaultInterface() (*ip.Link, error) {
@@ -46,4 +46,3 @@ func IpToByteArray(ip string) ([]byte, error) {
 	}
 	return octet_bytes, nil
 }
-

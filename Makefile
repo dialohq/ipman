@@ -57,8 +57,7 @@ deploy:
 		--key certs/server-key.pem                \
 		-n ims --dry-run=client -o yaml | kubectl apply -f -
 
-	kubectl apply -f config/controller_deployment.yaml \
-		-f samples/ipman.yaml
+	kubectl apply -f config/controller_deployment.yaml
 
 clean:
 	-cd config && kubectl delete                   \

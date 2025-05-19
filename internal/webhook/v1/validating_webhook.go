@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
+	"net"
 	"net/http"
 	"reflect"
 	"slices"
@@ -13,12 +15,14 @@ import (
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-type ValidatingWebhookHandler struct{
+type ValidatingWebhookHandler struct {
 	Client client.Client
 	Config rest.Config
 }
@@ -26,29 +30,29 @@ type ValidatingWebhookHandler struct{
 // actionTypes
 type creationAction struct{}
 type deletionAction struct{}
-type updateAction   struct{}
-type unknownAction  struct{}
+type updateAction struct{}
+type unknownAction struct{}
 
-func writeResponseNoPatch(w http.ResponseWriter, in *admissionv1.AdmissionReview){
-		w.Header().Add("Content-Type", "application/json")
-		r := noPatchResponse(in)
-		rjson, err := json.Marshal(r)
-		if err != nil {
-			fmt.Println("Error marshalling response for no patch: ", err)
-			return
-		}
-		w.Write(rjson)
+func writeResponseNoPatch(w http.ResponseWriter, in *admissionv1.AdmissionReview) {
+	w.Header().Add("Content-Type", "application/json")
+	r := noPatchResponse(in)
+	rjson, err := json.Marshal(r)
+	if err != nil {
+		fmt.Println("Error marshalling response for no patch: ", err)
+		return
+	}
+	w.Write(rjson)
 }
 
-func writeResponseDenied(w http.ResponseWriter, in *admissionv1.AdmissionReview, reason ...string){
-		w.Header().Add("Content-Type", "application/json")
-		r := deniedResponse(in, reason...)
-		rjson, err := json.Marshal(r)
-		if err != nil {
-			fmt.Println("Error marshalling response for denied: ", err)
-			return
-		}
-		w.Write(rjson)
+func writeResponseDenied(w http.ResponseWriter, in *admissionv1.AdmissionReview, reason ...string) {
+	w.Header().Add("Content-Type", "application/json")
+	r := deniedResponse(in, reason...)
+	rjson, err := json.Marshal(r)
+	if err != nil {
+		fmt.Println("Error marshalling response for denied: ", err)
+		return
+	}
+	w.Write(rjson)
 }
 
 func validateIpmanDeletion(req *admissionv1.AdmissionRequest, workers []corev1.Pod, xfrm []corev1.Pod) (bool, error) {
@@ -59,11 +63,8 @@ func validateIpmanDeletion(req *admissionv1.AdmissionRequest, workers []corev1.P
 	}
 
 	for _, p := range xfrm {
-		if slices.ContainsFunc(ipman.Spec.Children, func (c ipmanv1.Child) bool {
-			fmt.Println(c.Name,p.Annotations["ipman.dialo.ai/childName"], c.Name == p.Annotations["ipman.dialo.ai/childName"])
-			return c.Name == p.Annotations["ipman.dialo.ai/childName"]
-		}){
-			if !canDeleteXfrm(&p, workers){
+		if _, ok := ipman.Spec.Children[p.Annotations["ipman.dialo.ai/childName"]]; ok {
+			if !canDeleteXfrm(&p, workers) {
 				podNames := []string{}
 				for _, pod := range workers {
 					podNames = append(podNames, pod.Name)
@@ -76,32 +77,193 @@ func validateIpmanDeletion(req *admissionv1.AdmissionRequest, workers []corev1.P
 	return true, nil
 }
 
-func validateIpmanCreation(ipman ipmanv1.Ipman, other []ipmanv1.Ipman, pods []corev1.Pod)(bool, error){
-   	for _, obj := range other {
-   		if obj.Spec.Name == ipman.Spec.Name{
-   			return false, fmt.Errorf("Ipman with that name already exists %s == %s", obj.Spec.Name, ipman.Spec.Name)
-   		}
-   	}
-   	for _, p := range pods {
-   		if p.Annotations["ipman.dialo.ai/ipmanName"] == ipman.Spec.Name {
-   			return false, fmt.Errorf("There are existing pods with this ipman annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
-   		}
-   	}
-   	// no conflicts: allow creation
-   	return true, nil
+func validateIpmanUnique(ipman ipmanv1.Ipman) (bool, error) {
+	ips := sets.NewString()
+	ifids := sets.NewInt()
+	for _, c := range ipman.Spec.Children {
+		for _, pool := range c.IpPools {
+			for _, ip := range pool {
+				if ips.Has(ip) {
+					return false, fmt.Errorf("Duplicated ip across children: %s", ip)
+				}
+				ips.Insert(ip)
+			}
+		}
+		if ifids.Has(c.XfrmIfId) {
+			return false, fmt.Errorf("Duplicated xfrm if id across children: %d", c.XfrmIfId)
+		}
+		ifids.Insert(c.XfrmIfId)
+	}
+	return true, nil
 }
-func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod)(bool, error){
-		return false, fmt.Errorf("UNIMPLEMENTED")
+
+func validateIpmanCreation(ipman ipmanv1.Ipman, other []ipmanv1.Ipman, pods []corev1.Pod) (bool, error) {
+	for _, obj := range other {
+		if obj.Spec.Name == ipman.Spec.Name {
+			return false, fmt.Errorf("Ipman with that name already exists %s == %s", obj.Spec.Name, ipman.Spec.Name)
+		}
+	}
+	for _, p := range pods {
+		if p.Annotations["ipman.dialo.ai/ipmanName"] == ipman.Spec.Name {
+			return false, fmt.Errorf("There are existing pods with this ipman annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
+		}
+	}
+	return validateIpmanUnique(ipman)
+}
+
+func isChildDeleted(new map[string]ipmanv1.Child, old map[string]ipmanv1.Child) ([]ipmanv1.Child, bool) {
+	deleted := []ipmanv1.Child{}
+	for k, v := range old {
+		if _, ok := new[k]; !ok {
+			deleted = append(deleted, v)
+		}
+	}
+	if len(deleted) == 0 {
+		return nil, false
+	}
+
+	return deleted, true
+}
+
+func isChildAdded(new map[string]ipmanv1.Child, old map[string]ipmanv1.Child) ([]ipmanv1.Child, bool) {
+	added := []ipmanv1.Child{}
+	for k, v := range new {
+		if _, ok := old[k]; !ok {
+			added = append(added, v)
+		}
+	}
+	if len(added) == 0 {
+		return nil, false
+	}
+
+	return added, true
+}
+
+func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod) (bool, error) {
+	ctx := context.Background()
+	logger := log.FromContext(ctx)
+
+	newChildrenNames := slices.Collect(maps.Keys(new.Spec.Children))
+	oldChildrenNames := slices.Collect(maps.Keys(old.Spec.Children))
+	dependentPods := map[string][]corev1.Pod{}
+	for _, pod := range pods {
+		if imn, ok := pod.Annotations["ipman.dialo.ai/ipmanName"]; !ok || imn != new.Name {
+			continue
+		}
+		cn, ok := pod.Annotations["ipman.dialo.ai/childName"]
+		if ok && (slices.Contains(newChildrenNames, cn) || slices.Contains(oldChildrenNames, cn)) {
+			dependentPods[cn] = append(dependentPods[cn], pod)
+		}
+	}
+
+	nChildrenNew := len(new.Spec.Children)
+	nChildrenOld := len(old.Spec.Children)
+	if nChildrenNew != nChildrenOld {
+		del, isDel := isChildDeleted(new.Spec.Children, old.Spec.Children)
+		if isDel && len(del) != 0 {
+			for _, delChild := range del {
+				if len(dependentPods[delChild.Name]) != 0 {
+					dp := []types.NamespacedName{}
+					for _, p := range dependentPods[delChild.Name] {
+						dp = append(dp, types.NamespacedName{Name: p.Name, Namespace: p.Namespace})
+					}
+					return false, fmt.Errorf("Pods depend on child to be deleted: %v", dp)
+				}
+			}
+		}
+	}
+	// we don't need to check newly added children,
+	// since no pods depend on them
+	added, isAdded := isChildAdded(new.Spec.Children, old.Spec.Children)
+	if isAdded {
+		maps.DeleteFunc(new.Spec.Children, func(name string, child ipmanv1.Child) bool {
+			return slices.ContainsFunc(added, func(c ipmanv1.Child) bool {
+				if c.Name == child.Name {
+					return true
+				}
+				return false
+			})
+		})
+	}
+
+	for newChildName, newChild := range new.Spec.Children {
+		oldChild := old.Spec.Children[newChildName]
+		if !newChild.EqualExceptChangable(old.Spec.Children[newChildName]) {
+			// nothing else can be changed
+			return false, fmt.Errorf("The only field that supports live reload is ipPools")
+		}
+
+		ipPoolsEq := reflect.DeepEqual(newChild.IpPools, oldChild.IpPools)
+		if !ipPoolsEq {
+			deletedIps := []string{}
+			for poolName, pool := range oldChild.IpPools {
+				deletedIps = append(deletedIps, slices.DeleteFunc(pool, func(ip string) bool {
+					return slices.Contains(newChild.IpPools[poolName], ip)
+				})...)
+				// don't delete used ips
+			}
+
+			for _, pods := range dependentPods {
+				violatingPod := corev1.Pod{}
+				if slices.ContainsFunc(deletedIps, func(ip string) bool {
+					return slices.ContainsFunc(pods, func(pod corev1.Pod) bool {
+						if pod.Annotations["ipman.dialo.ai/vxlanIp"] == ip {
+							violatingPod = pod
+							return true
+						}
+						return false
+					})
+				}) {
+					return false, fmt.Errorf("Pod uses ip deleted from a pool, pod: %v", types.NamespacedName{Namespace: violatingPod.Namespace, Name: violatingPod.Name})
+				}
+			}
+		}
+
+		localIpsEq := reflect.DeepEqual(newChild.LocalIps, oldChild.LocalIps)
+		if !localIpsEq {
+			logger.Info("Deleted local ips")
+			deletedLocalIps := []string{}
+			for _, ip := range oldChild.LocalIps {
+				if !slices.Contains(newChild.LocalIps, ip) {
+					deletedLocalIps = append(deletedLocalIps, ip)
+				}
+			}
+
+			logger.Info("Deleted local ips", "ips", deletedLocalIps)
+			for _, ip := range deletedLocalIps {
+				_, subnet, err := net.ParseCIDR(ip)
+				if err != nil {
+					return false, fmt.Errorf("Error parsing local ip to subnet(%s): %w", ip, err)
+				}
+				for _, p := range pods {
+					podIp, ok := p.Annotations["ipman.dialo.ai/vxlanIp"]
+					if !ok {
+						continue
+					}
+					netIp, _, err := net.ParseCIDR(podIp)
+					if err != nil {
+						return false, fmt.Errorf("Error parsing pod ip(%s): %w", podIp, err)
+					}
+					logger.Info("subnet contains", "subnet", subnet.String(), "ip", netIp.String(), "contains", subnet.Contains(netIp))
+					if subnet.Contains(netIp) || ip == podIp {
+						return false, fmt.Errorf("Deleted localIp that's used by a pod: %v", types.NamespacedName{Name: p.Name, Namespace: p.Namespace})
+					}
+				}
+			}
+		}
+	}
+
+	return validateIpmanUnique(new)
 }
 
 func getAction(req *admissionv1.AdmissionRequest) any {
-	if len(req.OldObject.Raw) == 0  && len(req.Object.Raw) != 0 {
+	if len(req.OldObject.Raw) == 0 && len(req.Object.Raw) != 0 {
 		return creationAction{}
 	}
 
 	if len(req.OldObject.Raw) != 0 && len(req.Object.Raw) == 0 {
 		return deletionAction{}
-	} 
+	}
 
 	if len(req.OldObject.Raw) != 0 && len(req.Object.Raw) != 0 {
 		return updateAction{}
@@ -113,16 +275,16 @@ func getAction(req *admissionv1.AdmissionRequest) any {
 func extractXfrmPods(pods []corev1.Pod) []corev1.Pod {
 	annotatedPods := []corev1.Pod{}
 	for _, p := range pods {
-		if _, ok := p.Annotations["ipman.dialo.ai/childName"]; ok && p.Namespace == "ims"{
+		if _, ok := p.Annotations["ipman.dialo.ai/childName"]; ok && p.Namespace == "ims" {
 			annotatedPods = append(annotatedPods, p)
 		}
 	}
 	return annotatedPods
 }
 
-func(wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request){
+func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
-	logger := log.FromContext(ctx,"webhook", true)
+	logger := log.FromContext(ctx, "webhook", true)
 
 	in, err := u.ParseRequest(*r)
 	if err != nil {
@@ -143,51 +305,51 @@ func(wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 
 	verdict := false
 	switch action.(type) {
-		case creationAction:
-			logger.Info("Create action")
-			ipmen := &ipmanv1.IpmanList{}
-			err = wh.Client.List(ctx, ipmen)
-			if err != nil {
-				err = fmt.Errorf("Couldn't list ipmen: %w", err)
-				writeResponseDenied(w, in, err.Error())
-				return
-			}
-			// unmarshal new Ipman object from request
-			newIpman := &ipmanv1.Ipman{}
-			if err = json.Unmarshal(in.Request.Object.Raw, newIpman); err != nil {
-				err = fmt.Errorf("Couldn't unmarshal ipman for creation: %w", err)
-				writeResponseDenied(w, in, err.Error())
-				return
-			}
-			verdict, err = validateIpmanCreation(*newIpman, ipmen.Items, allPods.Items)
+	case creationAction:
+		logger.Info("Create action")
+		ipmen := &ipmanv1.IpmanList{}
+		err = wh.Client.List(ctx, ipmen)
+		if err != nil {
+			err = fmt.Errorf("Couldn't list ipmen: %w", err)
+			writeResponseDenied(w, in, err.Error())
+			return
+		}
+		// unmarshal new Ipman object from request
+		newIpman := &ipmanv1.Ipman{}
+		if err = json.Unmarshal(in.Request.Object.Raw, newIpman); err != nil {
+			err = fmt.Errorf("Couldn't unmarshal ipman for creation: %w", err)
+			writeResponseDenied(w, in, err.Error())
+			return
+		}
+		verdict, err = validateIpmanCreation(*newIpman, ipmen.Items, allPods.Items)
 
-		case deletionAction:
+	case deletionAction:
 
-			xfrmPods := extractXfrmPods(allPods.Items)
-			verdict, err = validateIpmanDeletion(in.Request, allPods.Items, xfrmPods)
-			logger.Info("Verdict", "Verdict", verdict, "error", err)
+		xfrmPods := extractXfrmPods(allPods.Items)
+		verdict, err = validateIpmanDeletion(in.Request, allPods.Items, xfrmPods)
+		logger.Info("Verdict", "Verdict", verdict, "error", err)
 
-		case updateAction:
-			old := ipmanv1.Ipman{}
-			err = json.Unmarshal(in.Request.OldObject.Raw, &old)
-			if err != nil {
-				err = fmt.Errorf("Couldn't unmarshal old object: %w", err)
-				writeResponseDenied(w, in, err.Error())
-				return
-			}
-			new := ipmanv1.Ipman{}
-			err = json.Unmarshal(in.Request.OldObject.Raw, &new)
-			if err != nil {
-				err = fmt.Errorf("Couldn't unmarshal new object: %w", err)
-				writeResponseDenied(w, in, err.Error())
-				return
-			}
-			verdict, err = validateIpmanUpdate(new, old, allPods.Items)
+	case updateAction:
+		old := ipmanv1.Ipman{}
+		err = json.Unmarshal(in.Request.OldObject.Raw, &old)
+		if err != nil {
+			err = fmt.Errorf("Couldn't unmarshal old object: %w", err)
+			writeResponseDenied(w, in, err.Error())
+			return
+		}
+		new := ipmanv1.Ipman{}
+		err = json.Unmarshal(in.Request.Object.Raw, &new)
+		if err != nil {
+			err = fmt.Errorf("Couldn't unmarshal new object: %w", err)
+			writeResponseDenied(w, in, err.Error())
+			return
+		}
+		verdict, err = validateIpmanUpdate(new, old, allPods.Items)
 
-		default:
-			logger.Info("unknown action")
-			verdict = false
-			err = fmt.Errorf("Couldn't determine action being taken")
+	default:
+		logger.Info("unknown action")
+		verdict = false
+		err = fmt.Errorf("Couldn't determine action being taken")
 	}
 
 	if verdict {
@@ -199,31 +361,29 @@ func(wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Requ
 }
 
 func canDeleteXfrm(xfrm *corev1.Pod, workers []corev1.Pod) bool {
-	fmt.Println("Can delete? ", workers)
-	dependentPods := slices.DeleteFunc(workers, func (p corev1.Pod)bool {
+	dependentPods := slices.DeleteFunc(workers, func(p corev1.Pod) bool {
 		cn, okChild := p.Annotations["ipman.dialo.ai/childName"]
 		_, okImn := p.Annotations["ipman.dialo.ai/ipmanName"]
 		_, okPn := p.Annotations["ipman.dialo.ai/poolName"]
 		return !(okChild && okImn && okPn && cn == xfrm.Annotations["ipman.dialo.ai/childName"])
 	})
-	fmt.Println("Can delete end? ", dependentPods)
 	return len(dependentPods) == 0
 }
 
-func noPatchResponse(in *admissionv1.AdmissionReview) *admissionv1.AdmissionReview{
+func noPatchResponse(in *admissionv1.AdmissionReview) *admissionv1.AdmissionReview {
 	return &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
 			Kind:       "AdmissionReview",
 			APIVersion: "admission.k8s.io/v1",
 		},
 		Response: &admissionv1.AdmissionResponse{
-			UID: in.Request.UID,
+			UID:     in.Request.UID,
 			Allowed: true,
 		},
 	}
 
 }
-func deniedResponse(in *admissionv1.AdmissionReview, reasonList ...string) *admissionv1.AdmissionReview{
+func deniedResponse(in *admissionv1.AdmissionReview, reasonList ...string) *admissionv1.AdmissionReview {
 	reason := "No reason provided."
 	if len(reasonList) != 0 {
 		reason = reasonList[0]
@@ -234,18 +394,18 @@ func deniedResponse(in *admissionv1.AdmissionReview, reasonList ...string) *admi
 			APIVersion: "admission.k8s.io/v1",
 		},
 		Response: &admissionv1.AdmissionResponse{
-			UID: in.Request.UID,
+			UID:     in.Request.UID,
 			Allowed: false,
 			Result: &metav1.Status{
 				TypeMeta: metav1.TypeMeta{},
-				Message: reason,
+				Message:  reason,
 			},
 		},
 	}
 
 }
 
-func response(patch []byte,in *admissionv1.AdmissionReview) *admissionv1.AdmissionReview{
+func response(patch []byte, in *admissionv1.AdmissionReview) *admissionv1.AdmissionReview {
 	pt := admissionv1.PatchTypeJSONPatch
 	return &admissionv1.AdmissionReview{
 		TypeMeta: metav1.TypeMeta{
@@ -253,11 +413,10 @@ func response(patch []byte,in *admissionv1.AdmissionReview) *admissionv1.Admissi
 			APIVersion: "admission.k8s.io/v1",
 		},
 		Response: &admissionv1.AdmissionResponse{
-			UID: in.Request.UID,
-			Allowed: true,
-			Patch: patch,
+			UID:       in.Request.UID,
+			Allowed:   true,
+			Patch:     patch,
 			PatchType: &pt,
 		},
 	}
 }
-

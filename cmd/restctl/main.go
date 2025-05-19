@@ -8,11 +8,11 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"syscall"
-	"os/signal"
 	"os/exec"
+	"os/signal"
 	"strconv"
 	"strings"
+	"syscall"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
@@ -22,9 +22,9 @@ import (
 
 // TODO: put in env variable or something
 var (
-	SWAN_CONF_PATH = "/etc/swanctl/swanctl.conf"
-	CHARON_CONN    = "/etc/charon-conn/"
-	API_SOCKET_PATH= "/restctlsock/restctl.sock"
+	SWAN_CONF_PATH  = "/etc/swanctl/swanctl.conf"
+	CHARON_CONN     = "/etc/charon-conn/"
+	API_SOCKET_PATH = "/restctlsock/restctl.sock"
 )
 
 type CommandResponse struct {
@@ -149,7 +149,7 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 		logger.Info("Error adding link, trying to delete conflicting one", "msg", err)
 		l, err := ip.LinkByName(linkName)
 		if err != nil {
-			logger.Error("No link with that name found","msg" , err, "link", l)
+			logger.Error("No link with that name found", "msg", err, "link", l)
 		}
 
 		err = ip.LinkDel(l)
@@ -210,7 +210,7 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// TODO: exponential backoff??
-	if _, ok := xfrmPodCiliumIPs[vd.ChildName]; !ok{
+	if _, ok := xfrmPodCiliumIPs[vd.ChildName]; !ok {
 		logger.Info("Xfrm pods cilium ip is still nil, waiting 10s")
 		writeResponseWait(w, 10)
 		return
@@ -242,7 +242,7 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(vi)
 }
 
-func reloadConfig(w http.ResponseWriter, r *http.Request){
+func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
@@ -253,7 +253,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request){
 		json.NewEncoder(w).Encode("Bad Request")
 		return
 	}
-	
+
 	data := &comms.ReloadData{}
 	err = json.Unmarshal(dataBytes, data)
 	if err != nil {
@@ -275,7 +275,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request){
 	cmd := swanExec("--load-all", "--file", SWAN_CONF_PATH)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		logger.Error("Couldn't reload swanctl","output", string(out),"error", err)
+		logger.Error("Couldn't reload swanctl", "output", string(out), "error", err)
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode("Bad Request")
 		return
@@ -286,7 +286,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request){
 }
 
 func main() {
-	
+
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
@@ -312,12 +312,12 @@ func main() {
 	}
 
 	c := make(chan os.Signal, 1)
-    signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
-    go func() {
-        <-c
-        os.Remove(API_SOCKET_PATH)
-        os.Exit(1)
-    }()
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		<-c
+		os.Remove(API_SOCKET_PATH)
+		os.Exit(1)
+	}()
 
 	logger.Info("Listening on socket", "socket", API_SOCKET_PATH)
 	if err := server.Serve(listener); err != nil {

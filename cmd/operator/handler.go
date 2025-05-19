@@ -6,15 +6,15 @@ import (
 	"io"
 	"net/http"
 
-	"k8s.io/apimachinery/pkg/types"
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 type stateServer struct {
-	client.Client 
+	client.Client
 	rest.Config
 }
 
@@ -27,7 +27,7 @@ func writeError(w http.ResponseWriter, err error) {
 	json.NewEncoder(w).Encode(rd)
 }
 
-func(s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	rd := &comms.StateRequestData{}
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -46,7 +46,7 @@ func(s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
 	nsn := types.NamespacedName{
 		Namespace: "ims",
-		Name: rd.IpmanName,
+		Name:      rd.IpmanName,
 	}
 
 	ipman := &ipmanv1.Ipman{}
