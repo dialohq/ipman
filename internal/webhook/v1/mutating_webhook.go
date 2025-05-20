@@ -41,7 +41,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	in, err := u.ParseRequest(*r)
 	if err != nil {
-		logger := log.FromContext(ctx, "webhook", true, "ERROR")
+		logger := log.FromContext(ctx, "webhook", true)
 		logger.Error(err, "Error parsing request", "request", *r)
 		writeResponseDenied(w, in)
 		return
@@ -58,10 +58,10 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 	var pod corev1.Pod
 	json.Unmarshal(in.Request.Object.Raw, &pod)
-	childName, childOk := pod.Annotations["ipman.dialo.ai/childName"]
-	connName, connOk := pod.Annotations["ipman.dialo.ai/ipmanName"]
-	poolName, poolOk := pod.Annotations["ipman.dialo.ai/poolName"]
-	if !(childOk && connOk && poolOk) {
+	childName, childOk := pod.Annotations[ipmanv1.AnnotationChildName]
+	ipmanName, ipmanOk := pod.Annotations[ipmanv1.AnnotationIpmanName]
+	poolName, poolOk := pod.Annotations[ipmanv1.AnnotationPoolName]
+	if !(childOk && ipmanOk && poolOk) {
 		writeResponseNoPatch(w, in)
 		return
 	}
@@ -81,10 +81,11 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		// of lease another instance already created it and
 		// it errors with "Already exists".
 		// This is a rough work around.
+		leaseName := strings.Join([]string{ipmanv1.LeasePrefix, ipmanName, ipmanv1.LeasePostfix}, "-")
 		for {
-			locker, err = k8slock.NewLocker("ipman-"+connName+"-lease-lock",
+			locker, err = k8slock.NewLocker(leaseName,
 				k8slock.TTL(5*time.Second),
-				k8slock.Namespace("ims"),
+				k8slock.Namespace(ipmanv1.IpmanSystemNamespace),
 				k8slock.Clientset(clientSet),
 			)
 			if err == nil {
@@ -109,7 +110,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	ipman := &ipmanv1.Ipman{}
 	nsn := types.NamespacedName{
 		Namespace: "",
-		Name:      connName,
+		Name:      ipmanName,
 	}
 	err = wh.Client.Get(ctx, nsn, ipman)
 	if err != nil {
@@ -147,16 +148,12 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	remoteJson, _ := json.Marshal(ipmanChild.RemoteIps)
 	localJson, _ := json.Marshal(ipmanChild.LocalIps)
 	annotations := map[string]string{
-		"ipman.dialo.ai/vxlanIp":     pool[0],
-		"ipman.dialo.ai/xfrmIp":      ipmanChild.XfrmIP,
-		"ipman.dialo.ai/interfaceId": strconv.FormatInt(int64(ipmanChild.XfrmIfId), 10),
-		// TODO: find remoteJson if the remote ip being added or removed
-		// affects this pod and restart it then??
-		// maybe annotation on creation if not present
-		// always restarted
-		"ipman.dialo.ai/remoteIps":        string(remoteJson),
-		"ipman.dialo.ai/localIps":         string(localJson),
-		"ipman.dialo.ai/xfrmUnderlyingIp": ipman.Status.XfrmGatewayIPs[ipmanChild.Name],
+		ipmanv1.AnnotationVxlanIp:          pool[0],
+		ipmanv1.AnnotationXfrmIp:           ipmanChild.XfrmIP,
+		ipmanv1.AnnotationIntefaceId:       strconv.FormatInt(int64(ipmanChild.XfrmIfId), 10),
+		ipmanv1.AnnotationRemoteIps:        string(remoteJson),
+		ipmanv1.AnnotationLocalIps:         string(localJson),
+		ipmanv1.AnnotationXfrmUnderlyingIp: ipman.Status.XfrmGatewayIPs[ipmanChild.Name],
 	}
 	ip := pool[0]
 	patch := patch(&pod, ip, ipman.Status.XfrmGatewayIPs[ipmanChild.Name], annotations, *ipmanChild)
@@ -188,11 +185,10 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 func initContainer(child ipmanv1.Child, gateway string, ip string) *corev1.Container {
 	remoteIps := strings.Join(child.RemoteIps, ",")
 	return &corev1.Container{
-		Name:            "iface-request",
-		Image:           "plan9better/vxlandlord:latest",
+		Name:            ipmanv1.InterfaceRequestContainerName,
+		Image:           ipmanv1.VxlandlordImage + ":" + ipmanv1.VxlandlordImageTag,
 		ImagePullPolicy: corev1.PullAlways,
 		SecurityContext: createNetAdminSecurityContext(),
-		// TODO: as a config map
 		Env: []corev1.EnvVar{
 			{
 				Name:  "VXLAN_IP",
@@ -229,7 +225,7 @@ func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
 	for i := range p.Spec.Containers {
 		env := []corev1.EnvVar{
 			{
-				Name:  "VXLAN_IP",
+				Name:  ipmanv1.WorkerContainerVxlanIpEnvVarName,
 				Value: ip,
 			},
 		}

@@ -19,7 +19,6 @@ import (
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 type ValidatingWebhookHandler struct {
@@ -104,7 +103,7 @@ func validateIpmanCreation(ipman ipmanv1.Ipman, other []ipmanv1.Ipman, pods []co
 		}
 	}
 	for _, p := range pods {
-		if p.Annotations["ipman.dialo.ai/ipmanName"] == ipman.Spec.Name {
+		if p.Annotations[ipmanv1.AnnotationIpmanName] == ipman.Spec.Name {
 			return false, fmt.Errorf("There are existing pods with this ipman annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
 		}
 	}
@@ -140,17 +139,14 @@ func isChildAdded(new map[string]ipmanv1.Child, old map[string]ipmanv1.Child) ([
 }
 
 func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod) (bool, error) {
-	ctx := context.Background()
-	logger := log.FromContext(ctx)
-
 	newChildrenNames := slices.Collect(maps.Keys(new.Spec.Children))
 	oldChildrenNames := slices.Collect(maps.Keys(old.Spec.Children))
 	dependentPods := map[string][]corev1.Pod{}
 	for _, pod := range pods {
-		if imn, ok := pod.Annotations["ipman.dialo.ai/ipmanName"]; !ok || imn != new.Name {
+		if imn, ok := pod.Annotations[ipmanv1.AnnotationIpmanName]; !ok || imn != new.Name {
 			continue
 		}
-		cn, ok := pod.Annotations["ipman.dialo.ai/childName"]
+		cn, ok := pod.Annotations[ipmanv1.AnnotationChildName]
 		if ok && (slices.Contains(newChildrenNames, cn) || slices.Contains(oldChildrenNames, cn)) {
 			dependentPods[cn] = append(dependentPods[cn], pod)
 		}
@@ -207,7 +203,7 @@ func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod
 				violatingPod := corev1.Pod{}
 				if slices.ContainsFunc(deletedIps, func(ip string) bool {
 					return slices.ContainsFunc(pods, func(pod corev1.Pod) bool {
-						if pod.Annotations["ipman.dialo.ai/vxlanIp"] == ip {
+						if pod.Annotations[ipmanv1.AnnotationVxlanIp] == ip {
 							violatingPod = pod
 							return true
 						}
@@ -221,7 +217,6 @@ func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod
 
 		localIpsEq := reflect.DeepEqual(newChild.LocalIps, oldChild.LocalIps)
 		if !localIpsEq {
-			logger.Info("Deleted local ips")
 			deletedLocalIps := []string{}
 			for _, ip := range oldChild.LocalIps {
 				if !slices.Contains(newChild.LocalIps, ip) {
@@ -229,14 +224,13 @@ func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod
 				}
 			}
 
-			logger.Info("Deleted local ips", "ips", deletedLocalIps)
 			for _, ip := range deletedLocalIps {
 				_, subnet, err := net.ParseCIDR(ip)
 				if err != nil {
 					return false, fmt.Errorf("Error parsing local ip to subnet(%s): %w", ip, err)
 				}
 				for _, p := range pods {
-					podIp, ok := p.Annotations["ipman.dialo.ai/vxlanIp"]
+					podIp, ok := p.Annotations[ipmanv1.AnnotationVxlanIp]
 					if !ok {
 						continue
 					}
@@ -244,7 +238,6 @@ func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod
 					if err != nil {
 						return false, fmt.Errorf("Error parsing pod ip(%s): %w", podIp, err)
 					}
-					logger.Info("subnet contains", "subnet", subnet.String(), "ip", netIp.String(), "contains", subnet.Contains(netIp))
 					if subnet.Contains(netIp) || ip == podIp {
 						return false, fmt.Errorf("Deleted localIp that's used by a pod: %v", types.NamespacedName{Name: p.Name, Namespace: p.Namespace})
 					}
@@ -275,7 +268,7 @@ func getAction(req *admissionv1.AdmissionRequest) any {
 func extractXfrmPods(pods []corev1.Pod) []corev1.Pod {
 	annotatedPods := []corev1.Pod{}
 	for _, p := range pods {
-		if _, ok := p.Annotations["ipman.dialo.ai/childName"]; ok && p.Namespace == "ims" {
+		if _, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && p.Namespace == ipmanv1.IpmanSystemNamespace {
 			annotatedPods = append(annotatedPods, p)
 		}
 	}
@@ -284,7 +277,6 @@ func extractXfrmPods(pods []corev1.Pod) []corev1.Pod {
 
 func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx := context.Background()
-	logger := log.FromContext(ctx, "webhook", true)
 
 	in, err := u.ParseRequest(*r)
 	if err != nil {
@@ -293,7 +285,6 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	}
 
 	action := getAction(in.Request)
-	logger.Info("validating", "action", reflect.TypeOf(action))
 
 	allPods := &corev1.PodList{}
 	err = wh.Client.List(ctx, allPods)
@@ -306,7 +297,6 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	verdict := false
 	switch action.(type) {
 	case creationAction:
-		logger.Info("Create action")
 		ipmen := &ipmanv1.IpmanList{}
 		err = wh.Client.List(ctx, ipmen)
 		if err != nil {
@@ -314,7 +304,6 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 			writeResponseDenied(w, in, err.Error())
 			return
 		}
-		// unmarshal new Ipman object from request
 		newIpman := &ipmanv1.Ipman{}
 		if err = json.Unmarshal(in.Request.Object.Raw, newIpman); err != nil {
 			err = fmt.Errorf("Couldn't unmarshal ipman for creation: %w", err)
@@ -324,10 +313,8 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		verdict, err = validateIpmanCreation(*newIpman, ipmen.Items, allPods.Items)
 
 	case deletionAction:
-
 		xfrmPods := extractXfrmPods(allPods.Items)
 		verdict, err = validateIpmanDeletion(in.Request, allPods.Items, xfrmPods)
-		logger.Info("Verdict", "Verdict", verdict, "error", err)
 
 	case updateAction:
 		old := ipmanv1.Ipman{}
@@ -347,7 +334,6 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		verdict, err = validateIpmanUpdate(new, old, allPods.Items)
 
 	default:
-		logger.Info("unknown action")
 		verdict = false
 		err = fmt.Errorf("Couldn't determine action being taken")
 	}
@@ -362,10 +348,10 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 
 func canDeleteXfrm(xfrm *corev1.Pod, workers []corev1.Pod) bool {
 	dependentPods := slices.DeleteFunc(workers, func(p corev1.Pod) bool {
-		cn, okChild := p.Annotations["ipman.dialo.ai/childName"]
-		_, okImn := p.Annotations["ipman.dialo.ai/ipmanName"]
-		_, okPn := p.Annotations["ipman.dialo.ai/poolName"]
-		return !(okChild && okImn && okPn && cn == xfrm.Annotations["ipman.dialo.ai/childName"])
+		cn, okChild := p.Annotations[ipmanv1.AnnotationChildName]
+		_, okImn := p.Annotations[ipmanv1.AnnotationIpmanName]
+		_, okPn := p.Annotations[ipmanv1.AnnotationPoolName]
+		return !(okChild && okImn && okPn && cn == xfrm.Annotations[ipmanv1.AnnotationChildName])
 	})
 	return len(dependentPods) == 0
 }

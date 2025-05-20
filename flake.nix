@@ -65,6 +65,8 @@
             yaml-language-server
             yamlfmt
             kuttl # kubernetes tests
+            kubernetes-helm
+            helm-ls
           ];
           shellHook = ''
             zsh

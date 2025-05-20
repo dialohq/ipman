@@ -7,8 +7,6 @@ import (
 	"slices"
 	"strings"
 	"time"
-	"os"
-	"strconv"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -25,41 +23,6 @@ import (
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
-)
-
-// Helper to get string env vars with fallback
-defaultEnv := func(key, fallback string) string {
-	if v := os.Getenv(key); v != "" {
-		return v
-	}
-	return fallback
-}
-
-// Helper to get int env vars with fallback
-getEnvInt := func(key string, fallback int) int {
-	if v := os.Getenv(key); v != "" {
-		if i, err := strconv.Atoi(v); err == nil {
-			return i
-		}
-	}
-	return fallback
-}
-
-var (
-	CharonPodName             = defaultEnv("CHARON_POD_NAME", "charon-pod")
-	CharonApiSocketVolumePath = defaultEnv("CHARON_API_SOCKET_VOLUME_PATH", "/restctlsock/")
-	CharonApiSocketVolumeName = defaultEnv("CHARON_API_SOCKET_VOLUME_NAME", "restctl")
-	CharonSocketVolume        = defaultEnv("CHARON_SOCKET_VOLUME", "charon-volume")
-	CharonConfVolume          = defaultEnv("CHARON_CONF_VOLUME", "charon-conf")
-	CharonContainerImage      = defaultEnv("CHARON_CONTAINER_IMAGE", "plan9better/strongswan-charon:0.0.1")
-	XfrmPodName               = defaultEnv("XFRM_POD_NAME", "xfrm-pod")
-
-	IpmanNamespace            = defaultEnv("IPMAN_NAMESPACE", "ims")
-	VxlanIpAnnotationKey      = defaultEnv("VXLAN_IP_ANNOTATION_KEY", "ipman.dialo.ai/vxlanIp")
-	ChildNameAnnotationKey    = defaultEnv("CHILD_NAME_ANNOTATION_KEY", "ipman.dialo.ai/childName")
-	IpmanNameAnnotationKey    = defaultEnv("IPMAN_NAME_ANNOTATION_KEY", "ipman.dialo.ai/ipmanName")
-	InterfaceIdAnnotationKey  = defaultEnv("INTERFACE_ID_ANNOTATION_KEY", "ipman.dialo.ai/interfaceId")
-	PendingIpTimeoutSeconds   = getEnvInt("PENDING_IP_TIMEOUT_SECONDS", 35)
 )
 
 type IpmanReconciler struct {
@@ -136,7 +99,7 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 
 	podsWithAnnotation := []*corev1.Pod{}
 	for _, p := range podlist.Items {
-		if slices.Contains(childNames, p.Annotations[ChildNameAnnotationKey]) {
+		if slices.Contains(childNames, p.Annotations[ipmanv1.AnnotationChildName]) {
 			podsWithAnnotation = append(podsWithAnnotation, &p)
 		}
 	}
@@ -150,16 +113,16 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 			return true
 		}
 		contains := slices.ContainsFunc(podsWithAnnotation, func(p *corev1.Pod) bool {
-			return p.Annotations[VxlanIpAnnotationKey] == ip
+			return p.Annotations[ipmanv1.AnnotationVxlanIp] == ip
 		})
-		timePassed := time.Now().After(ts.Add(time.Second * time.Duration(PendingIpTimeoutSeconds)))
+		timePassed := time.Now().After(ts.Add(time.Second * time.Duration(ipmanv1.ReconcilerPendingIpsTimeoutSeconds)))
 
 		return contains || timePassed
 	})
 
 	podIpList := []string{}
 	for _, p := range podsWithAnnotation {
-		podIpList = append(podIpList, p.Annotations[VxlanIpAnnotationKey])
+		podIpList = append(podIpList, p.Annotations[ipmanv1.AnnotationVxlanIp])
 	}
 
 	for cn, pools := range ipman.Status.FreeIPs {
@@ -183,7 +146,7 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 		// ignored since already checked above
 		// maybe combine it if there is a lot of them :TODO
 		t, _ := time.Parse(time.Layout, v)
-		sortedPending = append(sortedPending, t.Add(time.Second*35).Sub(time.Now()))
+		sortedPending = append(sortedPending, t.Add(time.Second*ipmanv1.ReconcilerPendingIpsTimeoutSeconds).Sub(time.Now()))
 	}
 	if len(sortedPending) == 0 {
 		return nil, nil
@@ -211,7 +174,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 		return err
 	}
 
-	_, proxyPod, err := r.ensureCharonPod(ctx, secret, ipman)
+	_, proxyPod, err := r.ensureCharonPod(ctx, ipman)
 	if err != nil {
 		return fmt.Errorf("failed to ensure Charon pod: %w", err)
 	}
@@ -229,7 +192,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 	}
 
 	for childName, c := range ipman.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP, ipman.Spec.Name)
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP, ipman.Spec.Name, ipman.Name)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 			return err
@@ -265,16 +228,16 @@ func (r *IpmanReconciler) reconcilePod(ctx context.Context, req reconcile.Reques
 		time.Sleep(1 * time.Second)
 		err = r.Get(ctx, req.NamespacedName, pod)
 		if err != nil {
-			return fmt.Errorf("Couldn't fetch pod while waiting for it's ip to add to bridge fdb: %w", err)
+			return fmt.Errorf("Couldn't fetch pod while reconciling: %w", err)
 		}
 	}
 	logger.Info("Pod got assigned ip", "pod", pod.Name, "ip", pod.Status.PodIP)
 
-	vxlanIp, ok := pod.Annotations[VxlanIpAnnotationKey]
+	vxlanIp, ok := pod.Annotations[ipmanv1.AnnotationVxlanIp]
 	if !ok {
 		return fmt.Errorf("Annotation vxlanIp not present")
 	}
-	ifid, ok := pod.Annotations[InterfaceIdAnnotationKey]
+	ifid, ok := pod.Annotations[ipmanv1.AnnotationIntefaceId]
 	if !ok {
 		return fmt.Errorf("Annotation interfaceid not present")
 	}
@@ -283,16 +246,16 @@ func (r *IpmanReconciler) reconcilePod(ctx context.Context, req reconcile.Reques
 	err = r.Get(
 		ctx,
 		types.NamespacedName{
-			Name:      pod.Annotations[IpmanNameAnnotationKey],
+			Name:      pod.Annotations[ipmanv1.AnnotationIpmanName],
 			Namespace: "",
 		},
 		ipman,
 	)
 	if err != nil {
-		return fmt.Errorf("Couldn't fetch pod while waiting for it's ip to add to bridge fdb: %w", err)
+		return fmt.Errorf("Couldn't fetch ipman while reconciling pod: %w", err)
 	}
 
-	childName := pod.Annotations[ChildNameAnnotationKey]
+	childName := pod.Annotations[ipmanv1.AnnotationChildName]
 	url := fmt.Sprintf("http://%s:8080/addEntry", ipman.Status.XfrmGatewayIPs[childName])
 	resp, err := comms.SendPost(url, comms.BridgeFdbRequest{
 		CiliumIp:    pod.Status.PodIP,
@@ -400,15 +363,17 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	// something deleted
 	if len(iml.Items) == 0 {
 		for _, p := range pods.Items {
-			if p.Namespace == IpmanNamespace {
-				if val, ok := p.Annotations[ChildNameAnnotationKey]; ok && val != "" {
+			if p.Namespace == ipmanv1.IpmanSystemNamespace {
+				if val, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && val != "" {
 					err = r.Delete(ctx, &p)
 					if err != nil {
 						logger.Error(err, "Error deleting pod since there are no ipmen", "podname", p.Name)
 					}
 				}
+
+				cpn := strings.Split(ipmanv1.CharonPodName, "-")
 				s := strings.Split(p.Name, "-")
-				if s[0] == "charon" && s[1] == "pod" && p.Namespace == IpmanNamespace {
+				if s[0] == cpn[0] && s[1] == cpn[1] && p.Namespace == ipmanv1.IpmanSystemNamespace {
 					err = r.Delete(ctx, &p)
 					if err != nil {
 						logger.Error(err, "Error deleting charon pod since there are no ipmen", "podname", p.Name)
@@ -419,11 +384,11 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		}
 	} else {
 		for _, p := range pods.Items {
-			if p.Namespace != IpmanNamespace {
+			if p.Namespace != ipmanv1.IpmanSystemNamespace {
 				continue
 			}
 
-			annotation, ok := p.Annotations[ChildNameAnnotationKey]
+			annotation, ok := p.Annotations[ipmanv1.AnnotationChildName]
 			if ok && !slices.Contains(chlidrenNameList, annotation) {
 				err = r.Delete(ctx, &p)
 				if err != nil {
@@ -443,7 +408,7 @@ var annotationPredicate = predicate.Funcs{
 		return hasIpmanAnnotation(e.ObjectNew)
 	},
 	DeleteFunc: func(e event.DeleteEvent) bool {
-		return hasIpmanAnnotation(e.Object) && e.Object.GetNamespace() != IpmanNamespace
+		return hasIpmanAnnotation(e.Object) && e.Object.GetNamespace() != ipmanv1.IpmanSystemNamespace
 	},
 	GenericFunc: func(e event.GenericEvent) bool {
 		return hasIpmanAnnotation(e.Object)
@@ -451,7 +416,7 @@ var annotationPredicate = predicate.Funcs{
 }
 
 func hasIpmanAnnotation(o client.Object) bool {
-	_, ok := o.GetAnnotations()[VxlanIpAnnotationKey]
+	_, ok := o.GetAnnotations()[ipmanv1.AnnotationVxlanIp]
 	return ok
 }
 

@@ -20,11 +20,10 @@ import (
 	ip "github.com/vishvananda/netlink"
 )
 
-// TODO: put in env variable or something
 var (
-	SWAN_CONF_PATH  = "/etc/swanctl/swanctl.conf"
-	CHARON_CONN     = "/etc/charon-conn/"
-	API_SOCKET_PATH = "/restctlsock/restctl.sock"
+	SWANCTL_CONF_PATH = ipmanv1.CharonConfVolumeMountPath + "swanctl.conf"
+	CHARON_CONN       = ipmanv1.CharonConnVolumeMountPath
+	API_SOCKET_PATH   = ipmanv1.CharonApiSocketVolumePath + "restctl.sock"
 )
 
 type CommandResponse struct {
@@ -42,7 +41,7 @@ func getAction(path string, childName *string) (*exec.Cmd, error) {
 		case "/status":
 			return swanExec("--list-conns"), nil
 		case "/config":
-			return exec.Command("cat", "/etc/swanctl/swanctl.conf"), nil
+			return exec.Command("cat", SWANCTL_CONF_PATH), nil
 		default:
 			return nil, fmt.Errorf("Amount of arguments and/or their type is invalid")
 		}
@@ -74,13 +73,11 @@ func runCommandHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	path := splitPath[0]
-	fmt.Println("path: ", path)
 	var childName *string
 	if len(splitPath) == 1 {
 		childName = nil
 	} else {
 		childName = &r.Form["childName"][0]
-		fmt.Println("child name: ", *childName)
 	}
 
 	var resp CommandResponse
@@ -263,7 +260,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err = os.WriteFile(SWAN_CONF_PATH, []byte(data.SerializedConfig), 0644)
+	err = os.WriteFile(SWANCTL_CONF_PATH, []byte(data.SerializedConfig), 0644)
 	if err != nil {
 		logger.Error(err.Error(), "Error writing data of request for reload to file")
 		w.WriteHeader(400)
@@ -272,7 +269,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	logger.Info("Reloading swanctl")
-	cmd := swanExec("--load-all", "--file", SWAN_CONF_PATH)
+	cmd := swanExec("--load-all", "--file", SWANCTL_CONF_PATH)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		logger.Error("Couldn't reload swanctl", "output", string(out), "error", err)

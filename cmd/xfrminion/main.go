@@ -9,6 +9,7 @@ import (
 	"net"
 
 	"net/http"
+	// "net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -18,6 +19,7 @@ import (
 	"dialo.ai/ipman/pkg/comms"
 	"dialo.ai/ipman/pkg/netconfig"
 	u "dialo.ai/ipman/pkg/utils"
+	// "github.com/mdlayher/arp"
 	ip "github.com/vishvananda/netlink"
 )
 
@@ -41,16 +43,12 @@ func addEntry(w http.ResponseWriter, r *http.Request) {
 	}
 	vxlanInterfaceName := "vxlan" + bfr.InterfaceId
 
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("bridge fdb add 00:00:00:00:00:00 dev %s dst %s", vxlanInterfaceName, bfr.CiliumIp))
+	cmd := exec.Command("bridge", "fdb", "append", "00:00:00:00:00:00", "dev", vxlanInterfaceName, "dst", bfr.CiliumIp)
 	if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
-
-		cmd = exec.Command("bash", "-c", fmt.Sprintf("bridge fdb append 00:00:00:00:00:00 dev %s dst %s", vxlanInterfaceName, bfr.CiliumIp))
-		if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
-			logger.Error("Error appending to bridge fdb", "msg", err)
-			code := 409
-			writeError(w, err, &code)
-			return
-		}
+		logger.Error("Error appending to bridge fdb", "msg", err)
+		code := 409
+		writeError(w, err, &code)
+		return
 	}
 
 	links, err := ip.LinkList()
@@ -283,6 +281,7 @@ func addRoutes(w http.ResponseWriter, r *http.Request) {
 		Port:         4789,
 		SrcAddr:      ciliumIP,
 		VtepDevIndex: (*ciliumInterface).Attrs().Index,
+		Learning:     true,
 	}
 	err = ip.LinkAdd(&vxlanIfaceTemplate)
 	u.Fatal(err, logger, "Couldn't add vxlan interface", "vxlan", vxlanIfaceTemplate)

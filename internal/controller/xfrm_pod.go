@@ -21,10 +21,8 @@ import (
 )
 
 func xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
-	// podNameEnv := os.Getenv("XFRM_POD_NAME")
-	// ns := os.Getenv("NAMESPACE_NAME")
-	ns := "ims"
-	podNameEnv := "xfrm-pod"
+	ns := ipmanv1.IpmanSystemNamespace
+	podNameEnv := ipmanv1.XfrmPodName
 	podName := strings.Join([]string{podNameEnv, childName, ipmanName}, "-")
 
 	return types.NamespacedName{
@@ -33,7 +31,7 @@ func xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
 	}
 }
 
-func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName string) (*corev1.Pod, error) {
+func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName, ipmanName string) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	xfrmPod := &corev1.Pod{}
@@ -42,7 +40,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 	xfrmUrl := ""
 	if apierrors.IsNotFound(err) {
 
-		xfrmPod = r.createXfrmPod(c, nodeName, connName)
+		xfrmPod = r.createXfrmPod(c, nodeName, connName, ipmanName)
 		if err := r.Create(ctx, xfrmPod); err != nil {
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
@@ -56,26 +54,26 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 
 		resp, err := http.Get(fmt.Sprintf("http://%s:8080/pid", xfrmPod.Status.PodIP))
 		if err != nil {
-			logger.Error(err, "Couldn't request PID from xfrm pod", "xfrm-pod", xfrmPod.Name)
+			logger.Error(err, "Couldn't request PID from xfrm pod", ipmanv1.XfrmPodName, xfrmPod.Name)
 			return nil, err
 		}
 		defer resp.Body.Close()
 		out, err := io.ReadAll(resp.Body)
 		if err != nil {
-			logger.Error(err, "Couldn't read body of pid response", "xfrm-pod", xfrmPod.Name)
+			logger.Error(err, "Couldn't read body of pid response", ipmanv1.XfrmPodName, xfrmPod.Name)
 			return nil, err
 		}
 
 		prd := &comms.PidResponseData{}
 		err = json.Unmarshal(out, prd)
 		if err != nil {
-			logger.Error(err, "Couldn't unmarshal body of pid response", "xfrm-pod", xfrmPod.Name)
+			logger.Error(err, "Couldn't unmarshal body of pid response", ipmanv1.XfrmPodName, xfrmPod.Name)
 			return nil, err
 		}
 
 		if prd.Error != "" {
 			err = fmt.Errorf("%s", prd.Error)
-			logger.Error(err, "Error in PID response from xfrm-pod")
+			logger.Error(err, "Error in PID response from xfrm pod")
 			return nil, err
 		}
 
@@ -129,61 +127,26 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 		return nil, err
 	}
 
-	// if xfrmPod.Status.PodIP == "" {
-	// 	xfrmPod, err = waitForPodReady(xfrmPod, xfrmPodNsn(c.Name, connName), r.Get)
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("Error waiting for pod to be ready while updating routes in xfrm pod: %w", err)
-	// 	}
-	// }
-	// xfrmUrl = fmt.Sprintf("http://%s:8080", xfrmPod.Status.PodIP)
-	// podLocalIps := []string{}
-	// ipmanLocalIps := slices.Clone(c.LocalIps)
-	// err = json.Unmarshal([]byte(xfrmPod.Annotations["ipman.dialo.ai/localIps"]), &podLocalIps)
-	// if err != nil {
-	// 	return nil, fmt.Errorf("Couldn't unmarshal xfrm pod local ips annotation: %w", err)
-	// }
-	// if !reflect.DeepEqual(podLocalIps, ipmanLocalIps) {
-	// 	missingIps := slices.DeleteFunc(ipmanLocalIps, func(ip string) bool {
-	// 		return slices.Contains(podLocalIps, ip)
-	// 	})
-	// 	logger.Info("sending post to xfrm to update routes", "xfrmurl", xfrmUrl)
-	// 	resp, err := comms.SendPost(xfrmUrl+"/addRoutes", missingIps)
-	// 	if err != nil {
-	// 		return nil, fmt.Errorf("Couldn't marshal array of local ips to add to xfrm pod routes: %w", err)
-	// 	}
-
-	// 	if resp.StatusCode != 200 {
-	// 		out, err := io.ReadAll(resp.Body)
-	// 		if err != nil {
-	// 			return nil, fmt.Errorf("Error adding routes to xfrm pod(status code not 200, is %d) error unmarshaling response body: %w", resp.StatusCode, err)
-	// 		}
-
-	// 		return nil, fmt.Errorf("Error adding routes to xfrm pod(status code not 200, is %d) body: %s", resp.StatusCode, string(out))
-	// 	}
-	// }
-
 	return xfrmPod, nil
 
 }
 
-func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connName string) *corev1.Pod {
+func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connName string, ipmanName string) *corev1.Pod {
 	remoteIpsJSON, _ := json.Marshal(c.RemoteIps)
-	// localIpsJSON, _ := json.Marshal(c.LocalIps)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      XfrmPodName + "-" + c.Name + "-" + connName,
-			Namespace: "ims",
+			Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, connName}, "-"),
+			Namespace: ipmanv1.IpmanSystemNamespace,
 			Labels: map[string]string{
-				"ipman.dialo.ai/xfrm": connName,
+				ipmanv1.XfrmPodLabelKey: connName,
 			},
 			Annotations: map[string]string{
-				"ipman.dialo.ai/ipmanName": connName,
-				"ipman.dialo.ai/childName": c.Name,
-				"ipman.dialo.ai/vxlanip":   c.VxlanIP,
-				"ipman.dialo.ai/xfrmip":    c.XfrmIP,
-				// "ipman.dialo.ai/localIps":  string(localIpsJSON),
-				"ipman.dialo.ai/remoteips": string(remoteIpsJSON),
-				"ipman.dialo.ai/xfrmid":    strconv.FormatInt(int64(c.XfrmIfId), 10),
+				ipmanv1.AnnotationIpmanName:  ipmanName,
+				ipmanv1.AnnotationChildName:  c.Name,
+				ipmanv1.AnnotationVxlanIp:    c.VxlanIP,
+				ipmanv1.AnnotationXfrmIp:     c.XfrmIP,
+				ipmanv1.AnnotationRemoteIps:  string(remoteIpsJSON),
+				ipmanv1.AnnotationIntefaceId: strconv.FormatInt(int64(c.XfrmIfId), 10),
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -214,8 +177,8 @@ func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connN
 			},
 			Containers: []corev1.Container{
 				{
-					Name:            "xfrm-container",
-					Image:           "plan9better/xfrminion:latest",
+					Name:            ipmanv1.XfrminionContainerName,
+					Image:           ipmanv1.XfrminionImage + ":" + ipmanv1.XfrminionImageTag,
 					ImagePullPolicy: corev1.PullAlways,
 					SecurityContext: r.createNetAdminSecurityContext(),
 					LivenessProbe: &corev1.Probe{

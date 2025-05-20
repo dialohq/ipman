@@ -45,7 +45,7 @@ func (s *stateServer) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	ctx := context.Background()
 	nsn := types.NamespacedName{
-		Namespace: "ims",
+		Namespace: ipmanv1.IpmanSystemNamespace,
 		Name:      rd.IpmanName,
 	}
 

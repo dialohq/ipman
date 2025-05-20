@@ -49,8 +49,8 @@ func main() {
 
 	logger.Info("New webhook")
 	whServer := webhook.NewServer(webhook.Options{
-		Port:    8443,
-		CertDir: "/etc/webhook/certs",
+		Port:    ipmanv1.WebhookServerPort,
+		CertDir: ipmanv1.WebhookServerCertDir,
 	})
 
 	if err = mgr.Add(whServer); err != nil {

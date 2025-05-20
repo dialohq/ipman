@@ -106,7 +106,7 @@ func main() {
 			"Error preparing ip address to append to bridge fdb",
 		)
 	}
-	cmd := exec.Command("bash", "-c", fmt.Sprintf("bridge fdb append 00:00:00:00:00:00 dev %s dst %s", "vxlan"+strconv.FormatInt(int64(ifId), 10), xfrmUnderlyingIp))
+	cmd := exec.Command("bridge", "fdb", "append", "00:00:00:00:00:00", "dev", "vxlan"+strconv.FormatInt(int64(ifId), 10), "dst", xfrmUnderlyingIp)
 	_, err = cmd.Output()
 	u.Fatal(err, logger, "Error appending to bridge fdb")
 
