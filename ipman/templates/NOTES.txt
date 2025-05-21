@@ -1,2 +1,1 @@
-1. Remove the french language pack from your server
-rm -fr ./
+Ipman - IPsec (vpn) Manager
