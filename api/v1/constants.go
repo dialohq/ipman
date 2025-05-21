@@ -15,19 +15,15 @@ const (
 	AnnotationLocalIps         = orgDomain + "/localIps"
 	AnnotationXfrmUnderlyingIp = orgDomain + "/xfrmUnderlyingIp"
 
-	XfrminionImage         = "plan9better/xfrminion"
-	XfrminionImageTag      = "latest" // ENV VAR
 	XfrminionContainerName = "xfrm-container"
 	XfrmPodName            = "xfrm-pod"
 	XfrmPodLabelKey        = orgDomain + "/xfrm"
 
-	VxlandlordImage               = "plan9better/vxlandlord"
-	VxlandlordImageTag            = "latest" // ENV VAR
 	InterfaceRequestContainerName = "iface-request"
 
 	CharonPodName                   = "charon-pod" // keep this 2 part seperated with '-'
 	CharonSocketVolumeName          = "charon-volume"
-	CharonSocketVolumeMountPath     = "/var/run/"
+	CharonSocketVolumeMountPath     = "/var/run/" // ENV VAR
 	CharonConfVolumeName            = "charon-conf"
 	CharonConfVolumeMountPath       = "/etc/swanctl/"
 	CharonConnVolumeName            = "charon-conn"
@@ -40,11 +36,7 @@ const (
 	CharonApiProxyContainerImage    = "caddy"
 	CharonApiProxyContainerImageTag = "2.10.0-alpine" // env var
 	CharonDaemonContainerName       = "charon-daemon"
-	CharonDaemonContainerImage      = "plan9better/strongswan-charon"
-	CharonDaemonContainerImageTag   = "0.0.1" // env var
 	CharonRestctlContainerName      = "restctl"
-	CharonRestctlImage              = "plan9better/restctl"
-	CharonRestctlImageTag           = "latest"
 	CharonCreateConfContainerName   = "create-conf"
 	CharonCreateConfImage           = "busybox"
 	CharonCreateConfImageTag        = "latest"

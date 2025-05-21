@@ -1,0 +1,8 @@
+apiVersion: cert-manager.io/v1
+kind: Issuer
+metadata:
+  name: {{.Values.IssuerName }}
+  namespace: {{ .Values.systemNamespace }}
+spec:
+  selfSigned: {}
+

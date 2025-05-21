@@ -17,8 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func charonPodNsn(ipmanName string) types.NamespacedName {
-	ns := ipmanv1.IpmanSystemNamespace
+func (r *IpmanReconciler) charonPodNsn(ipmanName string) types.NamespacedName {
+	ns := r.Env.NamespaceName
 	nameEnv := ipmanv1.CharonPodName
 
 	name := strings.Join([]string{nameEnv, ipmanName}, "-")
@@ -45,13 +45,13 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 		if err != nil {
 			return nil, nil, fmt.Errorf("Failed to find secret(%s): %w", "secretName", err)
 		}
-		cdl = append(cdl, ipmanv1.ConnData{Secret: string(sec.Data[ipmanv1.SecretKey]), Ipman: im})
+		cdl = append(cdl, ipmanv1.ConnData{Secret: string(sec.Data[im.Spec.SecretRef.Key]), Ipman: im})
 	}
 
 	serializedConfig := ipman.Spec.SerializeAllToConf(cdl)
 
 	charonPod := &corev1.Pod{}
-	err = r.Get(ctx, charonPodNsn(ipman.Spec.NodeName), charonPod)
+	err = r.Get(ctx, r.charonPodNsn(ipman.Spec.NodeName), charonPod)
 	if apierrors.IsNotFound(err) {
 		// wait for service to pick up webhooks
 		for {
@@ -74,7 +74,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 		return nil, nil, err
 	}
 
-	charonPod, err = waitForPodReady(charonPod, charonPodNsn(ipman.Spec.NodeName), r.Get)
+	charonPod, err = waitForPodReady(charonPod, r.charonPodNsn(ipman.Spec.NodeName), r.Get)
 	if err != nil {
 		logger.Error(err, "Error while waiting for charon pod to be ready")
 		return nil, nil, err
@@ -85,7 +85,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 		logger.Error(err, "Couldn't ensure charon proxy pod")
 		return nil, nil, err
 	}
-	proxyPod, err = waitForPodReady(proxyPod, proxyPodNsn(proxyPod.Name), r.Get)
+	proxyPod, err = waitForPodReady(proxyPod, r.proxyPodNsn(proxyPod.Name), r.Get)
 
 	url := "http://" + proxyPod.Status.PodIP + "/reload"
 	data := &comms.ReloadData{
@@ -112,7 +112,7 @@ func (r *IpmanReconciler) createCharonPod(serializedConfig string, ipman *ipmanv
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      ipmanv1.CharonPodName + "-" + ipman.Spec.NodeName,
-			Namespace: ipmanv1.IpmanSystemNamespace,
+			Namespace: r.Env.NamespaceName,
 			Labels: map[string]string{
 				ipmanv1.CharonPodServiceAnnotation: "true", // to get picked up by the service
 			},
@@ -147,7 +147,7 @@ func (r *IpmanReconciler) ensureCharonProxy(nodeName string) (*corev1.Pod, error
 
 	proxyPodName := ipmanv1.CharonPodName + "-" + ipmanv1.CharonProxyPodSuffix
 	proxyPod := &corev1.Pod{}
-	err := r.Get(ctx, types.NamespacedName{Name: proxyPodName, Namespace: ipmanv1.IpmanSystemNamespace}, proxyPod)
+	err := r.Get(ctx, types.NamespacedName{Name: proxyPodName, Namespace: r.Env.NamespaceName}, proxyPod)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			logger.Error(err, "Error fetching proxy pod")
@@ -178,10 +178,10 @@ func createCharonProxySocketVolume(path string) corev1.Volume {
 	}
 }
 
-func proxyPodNsn(name string) types.NamespacedName {
+func (r *IpmanReconciler) proxyPodNsn(name string) types.NamespacedName {
 	return types.NamespacedName{
 		Name:      name,
-		Namespace: ipmanv1.IpmanSystemNamespace,
+		Namespace: r.Env.NamespaceName,
 	}
 }
 
@@ -191,7 +191,7 @@ func (r *IpmanReconciler) createCharonProxyPod(proxyPodName, nodeName string) *c
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      proxyPodName,
-			Namespace: ipmanv1.IpmanSystemNamespace,
+			Namespace: r.Env.NamespaceName,
 		},
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
@@ -224,7 +224,7 @@ func (r *IpmanReconciler) createCharonDaemonContainer() corev1.Container {
 	return corev1.Container{
 		ImagePullPolicy: corev1.PullAlways,
 		Name:            ipmanv1.CharonDaemonContainerName,
-		Image:           ipmanv1.CharonDaemonContainerImage + ":" + ipmanv1.CharonDaemonContainerImageTag,
+		Image:           r.Env.CharonDaemonImage,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: ipmanv1.CharonSocketVolumeName, MountPath: ipmanv1.CharonSocketVolumeMountPath},
 			{Name: ipmanv1.CharonConfVolumeName, MountPath: ipmanv1.CharonConfVolumeMountPath},
@@ -237,7 +237,7 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 	return corev1.Container{
 		ImagePullPolicy: corev1.PullAlways,
 		Name:            ipmanv1.CharonRestctlContainerName,
-		Image:           ipmanv1.CharonRestctlImage + ":" + ipmanv1.CharonRestctlImageTag,
+		Image:           r.Env.RestctlImage,
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: ipmanv1.CharonApiSocketVolumeName, MountPath: ipmanv1.CharonApiSocketVolumePath},
 			{Name: ipmanv1.CharonSocketVolumeName, MountPath: ipmanv1.CharonSocketVolumeMountPath},

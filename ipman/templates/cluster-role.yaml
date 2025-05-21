@@ -1,0 +1,24 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ .Values.ClusterRoleName }}
+# TODO: limit this as much as possible
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "update", "create", "watch", "delete"]
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "update", "create", "list", "watch"]
+- apiGroups: ["ipman.dialo.ai"]
+  resources: ["ipmen"]
+  verbs: ["get", "list", "update", "create", "watch"]
+- apiGroups: ["ipman.dialo.ai"]
+  resources: ["ipmen/status"]
+  verbs: ["get", "update", "create", "patch"]
+- apiGroups: ["coordination.k8s.io"]
+  resources: ["leases"]
+  verbs: ["create", "delete", "list", "get", "watch", "update"]

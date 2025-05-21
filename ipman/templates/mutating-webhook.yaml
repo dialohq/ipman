@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: MutatingWebhookConfiguration
+metadata:
+  name: {{.Values.MutatingWebhookName}}
+  annotations:
+    cert-manager.io/inject-ca-from: {{.Values.systemNamespace}}/{{.Values.CertificateName}}
+
+webhooks:
+- name: webhook.{{ .Values.Organization}}
+  timeoutSeconds: 30
+  failurePolicy: Fail
+  admissionReviewVersions: ["v1"]
+  sideEffects: NoneOnDryRun
+  clientConfig:
+    service:
+      namespace: {{.Values.systemNamespace}}
+      name: {{.Values.WebhookServiceName}}
+      path: /mutating
+      port:  443
+  # this is here to prevent a deadlock
+  # since the webhook server is itself
+  # a pod, without it it would try to
+  # call itself on creation.
+  namespaceSelector:
+    matchExpressions:
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values:
+          - {{.Values.systemNamespace}}
+          
+  objectSelector: {}
+  rules:
+  - operations: ["CREATE"]
+    apiGroups: [""]
+    apiVersions: ["v1"]
+    resources: ["pods"]

@@ -11,7 +11,6 @@ import (
 	"strings"
 )
 
-// TODO: support other auth than PSK
 type Child struct {
 	Name      string              `json:"name"`
 	LocalIps  []string            `json:"local_ips"`
@@ -20,6 +19,7 @@ type Child struct {
 	IpPools   map[string][]string `json:"ip_pools"`
 	XfrmIP    string              `json:"xfrm_ip"`
 	VxlanIP   string              `json:"vxlan_ip"`
+	Extra     map[string]string   `json:"extra,omitempty"`
 }
 
 func (c *Child) HashSum() string {
@@ -39,23 +39,23 @@ func (c *Child) EqualExceptChangable(c2 Child) bool {
 	return reflect.DeepEqual(c_copy, c2_copy)
 }
 
+// TODO: migrate to go templates
 func (c *Child) SerializeToConf() string {
 	local_ts := strings.Join(c.LocalIps, ",")
 	remote_ts := strings.Join(c.RemoteIps, ",")
 
 	conf := fmt.Sprintf(`
 			%s {
-				start_action = trap
 				if_id_in = %d
 				if_id_out = %d
 				local_ts = %s
 				remote_ts = %s
-			    esp_proposals = aes256-sha256-ecp256
-			    start_action = start
-			    dpd_action = restart
-			    rekey_time = 1h
-			}
-		`, c.Name, c.XfrmIfId, c.XfrmIfId, local_ts, remote_ts)
+				`, c.Name, c.XfrmIfId, c.XfrmIfId, local_ts, remote_ts)
+
+	for k, v := range c.Extra {
+		conf += fmt.Sprintf("%s = %s\n", k, v)
+	}
+	conf += "}\n"
 	return conf
 }
 

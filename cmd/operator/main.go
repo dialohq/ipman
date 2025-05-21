@@ -13,6 +13,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	"dialo.ai/ipman/internal/controller"
 	cont "dialo.ai/ipman/internal/controller"
 	ipmanwhv1 "dialo.ai/ipman/internal/webhook/v1"
 )
@@ -37,11 +38,22 @@ func main() {
 		logger.Error(err, "Creating manager failed")
 		os.Exit(1)
 	}
+	e := controller.Envs{
+		NamespaceName:     os.Getenv("NAMESPACE_NAME"),
+		XfrminionImage:    os.Getenv("XFRMINION_IMAGE"),
+		VxlandlordImage:   os.Getenv("VXLANDLORD_IMAGE"),
+		RestctlImage:      os.Getenv("RESTCTL_IMAGE"),
+		CaddyImage:        os.Getenv("CADDY_IMAGE"),
+		CharonDaemonImage: os.Getenv("CHARONDAEMON_IMAGE"),
+		ProxySocketPath:   os.Getenv("PROXY_SOCKET_PATH"),
+		CharonSocketPath:  os.Getenv("CHARON_SOCKET_PATH"),
+	}
 
 	logger.Info("Creating controller")
 	if err = (&cont.IpmanReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
+		Env:    e,
 	}).SetupWithManager(mgr); err != nil {
 		logger.Error(err, "Creating controller failed")
 		os.Exit(1)
@@ -61,10 +73,12 @@ func main() {
 	mwh := ipmanwhv1.MutatingWebhookHandler{
 		Client: mgr.GetClient(),
 		Config: *mgr.GetConfig(),
+		Env:    e,
 	}
 	vwh := ipmanwhv1.ValidatingWebhookHandler{
 		Client: mgr.GetClient(),
 		Config: *mgr.GetConfig(),
+		Env:    e,
 	}
 	whServer.Register("/mutating", &mwh)
 	whServer.Register("/validating", &vwh)

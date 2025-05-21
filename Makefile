@@ -71,8 +71,6 @@ clean:
 		-f ipman-controller-service.yaml           \
 		-f namespace.yaml || true
 
-	-kubectl delete secret webhook-server-cert -n ims || true
-
 nix-build:
 	nix run .#vxlandlordImage.copyToRegistry
 	nix run .#xfrminion-initImage.copyToRegistry
@@ -81,14 +79,14 @@ nix-build:
 	nix run .#restctlImage.copyToRegistry
 
 vxlandlord:
-	docker build -t plan9better/vxlandlord:latest --platform linux/amd64 --file ./vxlandlord.Dockerfile .
-	docker push plan9better/vxlandlord:latest 
+	docker build -t plan9better/vxlandlord:1.0.0 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
+	docker push plan9better/vxlandlord:1.0.0 
 xfrminion:
-	docker build -t plan9better/xfrminion:latest --platform linux/amd64 --file ./xfrminion.Dockerfile .
-	docker push plan9better/xfrminion:latest 
+	docker build -t plan9better/xfrminion:1.0.0 --platform linux/amd64 --file ./xfrminion.Dockerfile .
+	docker push plan9better/xfrminion:1.0.0 
 restctl:
-	docker build -t plan9better/restctl:latest --platform linux/amd64 --file ./restctl.Dockerfile .
-	docker push plan9better/restctl:latest 
+	docker build -t plan9better/restctl:1.0.0 --platform linux/amd64 --file ./restctl.Dockerfile .
+	docker push plan9better/restctl:1.0.0 
 operator:
-	docker build -t plan9better/operator:latest --platform linux/amd64 --file ./operator.Dockerfile .
-	docker push plan9better/operator:latest 
+	docker build -t plan9better/operator:1.0.0 --platform linux/amd64 --file ./operator.Dockerfile .
+	docker push plan9better/operator:1.0.0 

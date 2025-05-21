@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	"dialo.ai/ipman/internal/controller"
 	u "dialo.ai/ipman/pkg/utils"
 	admissionv1 "k8s.io/api/admission/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -24,6 +25,7 @@ import (
 type ValidatingWebhookHandler struct {
 	Client client.Client
 	Config rest.Config
+	Env    controller.Envs
 }
 
 // actionTypes
@@ -265,10 +267,10 @@ func getAction(req *admissionv1.AdmissionRequest) any {
 	return unknownAction{}
 }
 
-func extractXfrmPods(pods []corev1.Pod) []corev1.Pod {
+func extractXfrmPods(pods []corev1.Pod, namespaceName string) []corev1.Pod {
 	annotatedPods := []corev1.Pod{}
 	for _, p := range pods {
-		if _, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && p.Namespace == ipmanv1.IpmanSystemNamespace {
+		if _, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && p.Namespace == namespaceName {
 			annotatedPods = append(annotatedPods, p)
 		}
 	}
@@ -313,7 +315,7 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		verdict, err = validateIpmanCreation(*newIpman, ipmen.Items, allPods.Items)
 
 	case deletionAction:
-		xfrmPods := extractXfrmPods(allPods.Items)
+		xfrmPods := extractXfrmPods(allPods.Items, wh.Env.NamespaceName)
 		verdict, err = validateIpmanDeletion(in.Request, allPods.Items, xfrmPods)
 
 	case updateAction:

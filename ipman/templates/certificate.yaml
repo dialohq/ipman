@@ -1,0 +1,19 @@
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ .Values.CertificateName }} 
+  namespace: {{ .Values.systemNamespace }}
+spec:
+  isCA: true
+  commonName: {{ .Values.WebhookServiceName }}.{{ .Values.systemNamespace }}.svc
+  dnsNames:
+  - {{ .Values.WebhookServiceName }}.{{ .Values.systemNamespace }}.svc
+  - {{ .Values.WebhookServiceName }}.{{ .Values.systemNamespace }}.svc.cluster.local
+  secretName: {{ .Values.CertificateSecretName }}
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+  issuerRef:
+    name: {{ .Values.IssuerName }}
+    kind: Issuer
+    group: cert-manager.io

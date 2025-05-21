@@ -1,0 +1,127 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: ipmen.ipman.dialo.ai
+spec:
+  group: ipman.dialo.ai
+  names:
+    kind: Ipman
+    listKind: IpmanList
+    plural: ipmen
+    singular: ipman
+  scope: Cluster
+  versions:
+    - name: v1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            apiVersion:
+              type: string
+            kind:
+              type: string
+            metadata:
+              type: object
+            spec:
+              type: object
+              required:
+                - children
+                - localId
+                - name
+                - nodeName
+                - remoteAddr
+                - localAddr
+                - remoteId
+                - secretRef
+              properties:
+                extra:
+                  type: object
+                  additionalProperties:
+                    type: string
+                children:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    required:
+                      - name
+                      - if_id
+                      - ip_pools
+                      - xfrm_ip
+                      - vxlan_ip
+                    properties:
+                      extra:
+                        type: object
+                        additionalProperties:
+                          type: string
+                      name:
+                        type: string
+                      if_id:
+                        type: integer
+                      xfrm_ip:
+                        type: string
+                      vxlan_ip:
+                        type: string
+                      local_ips:
+                        type: array
+                        items:
+                          type: string
+                      remote_ips:
+                        type: array
+                        items:
+                          type: string
+                      ip_pools:
+                        type: object
+                        additionalProperties:
+                          type: array
+                          items:
+                            type: string
+                localId:
+                  type: string
+                name:
+                  type: string
+                nodeName:
+                  type: string
+                remoteAddr:
+                  type: string
+                localAddr:
+                  type: string
+                remoteId:
+                  type: string
+                secretRef:
+                  type: object
+                  required:
+                    - key
+                    - name
+                    - namespace
+                  properties:
+                    key:
+                      type: string
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+            status:
+              type: object
+              properties:
+                xfrmGatewayIp:
+                  type: object
+                  additionalProperties:
+                    type: string
+                freeIps:
+                  type: object
+                  additionalProperties:
+                    type: object
+                    additionalProperties:
+                      type: array
+                      items:
+                        type: string
+                charonProxyIp:
+                  type: string
+                pendingIps:
+                  type: object
+                  additionalProperties:
+                    type: string
+      subresources:
+        status: {}

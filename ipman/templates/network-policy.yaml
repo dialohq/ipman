@@ -1,0 +1,16 @@
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-ingress-default-np
+  namespace: default
+  labels:
+    meta.helm.sh/release-name: {{ include "ipman.name" .}}
+    app.kubernetes.io/managed-by: Helm
+    meta.helm.sh/release-namespace: default
+
+spec:
+  ingress:
+  - {}
+  podSelector: {}
+  policyTypes:
+  - Ingress

@@ -25,9 +25,21 @@ import (
 	"dialo.ai/ipman/pkg/comms"
 )
 
+type Envs struct {
+	NamespaceName     string
+	ProxySocketPath   string
+	CharonSocketPath  string
+	XfrminionImage    string
+	VxlandlordImage   string
+	RestctlImage      string
+	CaddyImage        string
+	CharonDaemonImage string
+}
+
 type IpmanReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
+	Env    Envs
 }
 
 func (r *IpmanReconciler) isReconcilingKindIpman(ctx context.Context, req reconcile.Request) (bool, error) {
@@ -363,7 +375,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	// something deleted
 	if len(iml.Items) == 0 {
 		for _, p := range pods.Items {
-			if p.Namespace == ipmanv1.IpmanSystemNamespace {
+			if p.Namespace == r.Env.NamespaceName {
 				if val, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && val != "" {
 					err = r.Delete(ctx, &p)
 					if err != nil {
@@ -373,7 +385,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 
 				cpn := strings.Split(ipmanv1.CharonPodName, "-")
 				s := strings.Split(p.Name, "-")
-				if s[0] == cpn[0] && s[1] == cpn[1] && p.Namespace == ipmanv1.IpmanSystemNamespace {
+				if s[0] == cpn[0] && s[1] == cpn[1] && p.Namespace == r.Env.NamespaceName {
 					err = r.Delete(ctx, &p)
 					if err != nil {
 						logger.Error(err, "Error deleting charon pod since there are no ipmen", "podname", p.Name)
@@ -384,7 +396,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		}
 	} else {
 		for _, p := range pods.Items {
-			if p.Namespace != ipmanv1.IpmanSystemNamespace {
+			if p.Namespace != r.Env.NamespaceName {
 				continue
 			}
 
@@ -400,27 +412,26 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 	return res(rq), nil
 }
 
-var annotationPredicate = predicate.Funcs{
-	CreateFunc: func(e event.CreateEvent) bool {
-		return hasIpmanAnnotation(e.Object)
-	},
-	UpdateFunc: func(e event.UpdateEvent) bool {
-		return hasIpmanAnnotation(e.ObjectNew)
-	},
-	DeleteFunc: func(e event.DeleteEvent) bool {
-		return hasIpmanAnnotation(e.Object) && e.Object.GetNamespace() != ipmanv1.IpmanSystemNamespace
-	},
-	GenericFunc: func(e event.GenericEvent) bool {
-		return hasIpmanAnnotation(e.Object)
-	},
-}
-
 func hasIpmanAnnotation(o client.Object) bool {
 	_, ok := o.GetAnnotations()[ipmanv1.AnnotationVxlanIp]
 	return ok
 }
 
 func (r *IpmanReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	var annotationPredicate = predicate.Funcs{
+		CreateFunc: func(e event.CreateEvent) bool {
+			return hasIpmanAnnotation(e.Object)
+		},
+		UpdateFunc: func(e event.UpdateEvent) bool {
+			return hasIpmanAnnotation(e.ObjectNew)
+		},
+		DeleteFunc: func(e event.DeleteEvent) bool {
+			return hasIpmanAnnotation(e.Object) && e.Object.GetNamespace() != r.Env.NamespaceName
+		},
+		GenericFunc: func(e event.GenericEvent) bool {
+			return hasIpmanAnnotation(e.Object)
+		},
+	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&ipmanv1.Ipman{}).
 		Watches(&corev1.Pod{}, &handler.EnqueueRequestForObject{}, builder.WithPredicates(annotationPredicate)).

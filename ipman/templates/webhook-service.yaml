@@ -1,0 +1,16 @@
+
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{.Values.WebhookServiceName}}
+  namespace: {{.Values.systemNamespace}}
+spec:
+  ports:
+  - port: 443
+    name: "webhook"
+    protocol: TCP
+    targetPort: 8443
+
+  selector:
+    app.kubernetes.io/name: {{include "ipman.name" .}}
+    control-plane: controller-manager

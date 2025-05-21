@@ -1,0 +1,36 @@
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingWebhookConfiguration
+metadata:
+  name: {{.Values.ValidatingWebhookName}}
+  annotations:
+    cert-manager.io/inject-ca-from: {{.Values.systemNamespace}}/{{.Values.CertificateName}}
+webhooks:
+- name: webhook.{{.Values.Organization}}
+  # failurePolicy: Fail
+  admissionReviewVersions: ["v1"]
+  sideEffects: None
+  clientConfig:
+    service:
+      namespace: {{.Values.systemNamespace}}
+      name: {{.Values.WebhookServiceName}}
+      path: /validating
+      port:  443
+  # this is here to prevent a deadlock
+  # since the webhook server is itself
+  # a pod, without it it would try to
+  # call itself on creation.
+  objectSelector:
+    matchExpressions:
+      - key: app.kubernetes.io/name
+        operator: NotIn
+        values:
+          - {{ include "ipman.name" .}}
+      - key: control-plane
+        operator: NotIn
+        values:
+          - controller-manager
+  rules:
+  - operations: ["CREATE", "DELETE", "UPDATE"]
+    apiGroups: ["{{.Values.Organization}}"]
+    apiVersions: ["v1"]
+    resources: ["ipmen"]

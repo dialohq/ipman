@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	"dialo.ai/ipman/internal/controller"
 	u "dialo.ai/ipman/pkg/utils"
 	"github.com/jrhouston/k8slock"
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,7 @@ import (
 type MutatingWebhookHandler struct {
 	Client client.Client
 	Config rest.Config
+	Env    controller.Envs
 }
 
 // For dry run, we don't want side effects
@@ -85,7 +87,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		for {
 			locker, err = k8slock.NewLocker(leaseName,
 				k8slock.TTL(5*time.Second),
-				k8slock.Namespace(ipmanv1.IpmanSystemNamespace),
+				k8slock.Namespace(wh.Env.NamespaceName),
 				k8slock.Clientset(clientSet),
 			)
 			if err == nil {
@@ -156,7 +158,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		ipmanv1.AnnotationXfrmUnderlyingIp: ipman.Status.XfrmGatewayIPs[ipmanChild.Name],
 	}
 	ip := pool[0]
-	patch := patch(&pod, ip, ipman.Status.XfrmGatewayIPs[ipmanChild.Name], annotations, *ipmanChild)
+	patch := patch(&pod, ip, ipman.Status.XfrmGatewayIPs[ipmanChild.Name], annotations, *ipmanChild, wh.Env.VxlandlordImage)
 	ipman.Status.FreeIPs[ipmanChild.Name][poolName] = slices.Delete(ipman.Status.FreeIPs[ipmanChild.Name][poolName], 0, 1)
 	if ipman.Status.PendingIPs == nil {
 		ipman.Status.PendingIPs = map[string]string{}
@@ -182,11 +184,11 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	w.Write(respJson)
 }
 
-func initContainer(child ipmanv1.Child, gateway string, ip string) *corev1.Container {
+func initContainer(child ipmanv1.Child, gateway, ip, image string) *corev1.Container {
 	remoteIps := strings.Join(child.RemoteIps, ",")
 	return &corev1.Container{
 		Name:            ipmanv1.InterfaceRequestContainerName,
-		Image:           ipmanv1.VxlandlordImage + ":" + ipmanv1.VxlandlordImageTag,
+		Image:           image,
 		ImagePullPolicy: corev1.PullAlways,
 		SecurityContext: createNetAdminSecurityContext(),
 		Env: []corev1.EnvVar{
@@ -255,22 +257,22 @@ func createAnnotationPatch(annotations map[string]string) []jsonPatch {
 	return patches
 }
 
-func createInitContainerPatch(p *corev1.Pod, child ipmanv1.Child, gateway string, ip string) *jsonPatch {
+func createInitContainerPatch(p *corev1.Pod, child ipmanv1.Child, gateway, ip, image string) *jsonPatch {
 	if len(p.Spec.InitContainers) == 0 {
 		return &jsonPatch{
 			Op:    "add",
 			Path:  "/spec/initContainers",
-			Value: []corev1.Container{*initContainer(child, gateway, ip)},
+			Value: []corev1.Container{*initContainer(child, gateway, ip, image)},
 		}
 	}
 	return &jsonPatch{
 		Op:    "add",
 		Path:  "/spec/initContainers/-",
-		Value: *initContainer(child, gateway, ip),
+		Value: *initContainer(child, gateway, ip, image),
 	}
 }
 
-func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]string, child ipmanv1.Child) []byte {
+func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]string, child ipmanv1.Child, image string) []byte {
 	patch := []jsonPatch{}
 
 	ap := createAnnotationPatch(annotations)
@@ -280,7 +282,7 @@ func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]stri
 	}
 	patch = append(patch, ap...)
 
-	icp := createInitContainerPatch(p, child, gateway, ip)
+	icp := createInitContainerPatch(p, child, gateway, ip, image)
 	patch = append(patch, *icp)
 
 	ep := createEnvPatch(p, ip)

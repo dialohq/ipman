@@ -2,17 +2,19 @@ package v1
 
 import (
 	"fmt"
+	"strings"
 )
 
 type IpmanSpec struct {
-	Name       string           `json:"name"`
-	RemoteAddr string           `json:"remoteAddr"`
-	LocalAddr  string           `json:"localAddr"`
-	LocalId    string           `json:"localId"`
-	RemoteId   string           `json:"remoteId"`
-	SecretRef  SecretRef        `json:"secretRef"`
-	Children   map[string]Child `json:"children"`
-	NodeName   string           `json:"nodeName"`
+	Name       string            `json:"name"`
+	RemoteAddr string            `json:"remoteAddr"`
+	LocalAddr  string            `json:"localAddr"`
+	LocalId    string            `json:"localId"`
+	RemoteId   string            `json:"remoteId"`
+	SecretRef  SecretRef         `json:"secretRef"`
+	Children   map[string]Child  `json:"children"`
+	NodeName   string            `json:"nodeName"`
+	Extra      map[string]string `json:"extra,omitempty"`
 }
 
 type ConnData struct {
@@ -42,9 +44,6 @@ func (v *IpmanSpec) SerializeAllToConf(data []ConnData) string {
 		children {
 			%s
 		}
-		version = 2
-		proposals = aes256-sha256-ecp256
-	}
 `,
 			d.Ipman.Spec.Name,
 			d.Ipman.Spec.RemoteAddr,
@@ -53,15 +52,20 @@ func (v *IpmanSpec) SerializeAllToConf(data []ConnData) string {
 			d.Ipman.Spec.RemoteId,
 			serializedChildren,
 		)
+		for k, v := range d.Ipman.Spec.Extra {
+			conns += fmt.Sprintf("%s = %s\n", k, v)
+		}
+		conns += "}\n"
+
 		secrets += fmt.Sprintf(`
-	ike-%s {
+	%s {
 		secret = "%s"
 		local-id = %s
 		remote-id = %s
 	}
 `,
-			d.Ipman.Spec.Name,
-			d.Secret,
+			d.Ipman.Spec.SecretRef.Key,
+			strings.Trim(d.Secret, " \n\t"),
 			d.Ipman.Spec.LocalId,
 			d.Ipman.Spec.RemoteId)
 	}

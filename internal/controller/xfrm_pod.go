@@ -20,8 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
-	ns := ipmanv1.IpmanSystemNamespace
+func (r *IpmanReconciler) xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
+	ns := r.Env.NamespaceName
 	podNameEnv := ipmanv1.XfrmPodName
 	podName := strings.Join([]string{podNameEnv, childName, ipmanName}, "-")
 
@@ -36,7 +36,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 
 	xfrmPod := &corev1.Pod{}
 
-	err := r.Get(ctx, xfrmPodNsn(c.Name, connName), xfrmPod)
+	err := r.Get(ctx, r.xfrmPodNsn(c.Name, connName), xfrmPod)
 	xfrmUrl := ""
 	if apierrors.IsNotFound(err) {
 
@@ -46,7 +46,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 			return nil, err
 		}
 
-		xfrmPod, err = waitForPodReady(xfrmPod, xfrmPodNsn(c.Name, connName), r.Get)
+		xfrmPod, err = waitForPodReady(xfrmPod, r.xfrmPodNsn(c.Name, connName), r.Get)
 		if err != nil {
 			logger.Error(err, "Error waiting for xfrm pod to be ready", "pod", xfrmPod.Name)
 			return nil, err
@@ -136,7 +136,7 @@ func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connN
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, connName}, "-"),
-			Namespace: ipmanv1.IpmanSystemNamespace,
+			Namespace: r.Env.NamespaceName,
 			Labels: map[string]string{
 				ipmanv1.XfrmPodLabelKey: connName,
 			},
@@ -178,7 +178,7 @@ func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connN
 			Containers: []corev1.Container{
 				{
 					Name:            ipmanv1.XfrminionContainerName,
-					Image:           ipmanv1.XfrminionImage + ":" + ipmanv1.XfrminionImageTag,
+					Image:           r.Env.XfrminionImage,
 					ImagePullPolicy: corev1.PullAlways,
 					SecurityContext: r.createNetAdminSecurityContext(),
 					LivenessProbe: &corev1.Probe{

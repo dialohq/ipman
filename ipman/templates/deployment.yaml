@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "ipman.fullname" . }}
+  namespace: {{ .Values.systemNamespace }}
+  labels:
+    {{- include "ipman.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "ipman.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "ipman.labels" . | nindent 8 }}
+        {{- with .Values.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      serviceAccountName: {{ include "ipman.serviceAccountName" . }}
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: {{ .Chart.Name }}
+          {{- with .Values.securityContext }}
+          securityContext:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          env:
+            - name: NAMESPACE_NAME
+              value: {{ .Values.systemNamespace }}
+            - name: XFRMINION_IMAGE
+              value: {{ .Values.XfrminionImage }}
+            - name: VXLANDLORD_IMAGE
+              value: {{ .Values.VxlandlordImage }}
+            - name: RESTCTL_IMAGE
+              value: {{ .Values.RestctlImage }}
+            - name: CHARONDAEMON_IMAGE
+              value: {{ .Values.CharondaemonImage}}
+            - name: CADDY_IMAGE
+              value: {{ .Values.CaddyImage }}
+            - name: PROXY_SOCKET_PATH
+              value: {{ .Values.ProxySocketPath }}
+            - name: CHARON_SOCKET_PATH
+              value: {{ .Values.CharonSocketPath }}
+
+          volumeMounts:
+          - name: {{ .Values.volumeMountName }}
+            mountPath: /etc/webhook/certs
+            readOnly: true
+      volumes:
+      - name: {{ .Values.volumeMountName }}
+        secret:
+          secretName: {{ .Values.CertificateSecretName}}
