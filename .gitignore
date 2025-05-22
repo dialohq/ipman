@@ -2,3 +2,4 @@ certs
 samples
 result
 kubeconfig
+ipman/ipman-*.tgz

@@ -71,22 +71,15 @@ clean:
 		-f ipman-controller-service.yaml           \
 		-f namespace.yaml || true
 
-nix-build:
-	nix run .#vxlandlordImage.copyToRegistry
-	nix run .#xfrminion-initImage.copyToRegistry
-	nix run .#xfrminion-agentImage.copyToRegistry
-	nix run .#operatorImage.copyToRegistry
-	nix run .#restctlImage.copyToRegistry
-
 vxlandlord:
-	docker build -t plan9better/vxlandlord:1.0.1 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
-	docker push plan9better/vxlandlord:1.0.1 
+	docker build -t plan9better/vxlandlord:0.0.1 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
+	docker push plan9better/vxlandlord:0.0.1 
 xfrminion:
-	docker build -t plan9better/xfrminion:1.0.0 --platform linux/amd64 --file ./xfrminion.Dockerfile .
-	docker push plan9better/xfrminion:1.0.0 
+	docker build -t plan9better/xfrminion:0.0.1 --platform linux/amd64 --file ./xfrminion.Dockerfile .
+	docker push plan9better/xfrminion:0.0.1 
 restctl:
-	docker build -t plan9better/restctl:1.0.0 --platform linux/amd64 --file ./restctl.Dockerfile .
-	docker push plan9better/restctl:1.0.0 
+	docker build -t plan9better/restctl:0.0.1 --platform linux/amd64 --file ./restctl.Dockerfile .
+	docker push plan9better/restctl:0.0.1 
 operator:
-	docker build -t plan9better/operator:1.0.0 --platform linux/amd64 --file ./operator.Dockerfile .
-	docker push plan9better/operator:1.0.0 
+	docker build -t plan9better/operator:0.0.1 --platform linux/amd64 --file ./operator.Dockerfile .
+	docker push plan9better/operator:0.0.1 

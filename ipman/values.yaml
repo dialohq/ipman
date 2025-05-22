@@ -17,16 +17,16 @@ MutatingWebhookName: "ipman-mutating-webhook"
 ValidatingWebhookName: "ipman-validating-webhook"
 Organization: "ipman.dialo.ai"
 CaddyImage: "caddy:2.10.0-alpine"
-RestctlImage: "plan9better/restctl:1.0.0"
-VxlandlordImage: "plan9better/vxlandlord:1.0.0"
-XfrminionImage: "plan9better/xfrminion:1.0.0"
-CharondaemonImage: "plan9better/strongswan-charon:1.0.0"
+RestctlImage: "plan9better/restctl:0.0.1"
+VxlandlordImage: "plan9better/vxlandlord:0.0.1"
+XfrminionImage: "plan9better/xfrminion:0.0.1"
+CharondaemonImage: "plan9better/strongswan-charon:0.0.1"
 image:
   repository: plan9better/operator
   # This sets the pull policy for images.
   pullPolicy: Always
   # Overrides the image tag whose default is the chart appVersion.
-  tag: "1.0.0"
+  tag: "0.0.1"
 # This is for the secrets for pulling an image from a private repository more information can be found here: https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/
 # imagePullSecrets: []
 # This is to override the chart name.

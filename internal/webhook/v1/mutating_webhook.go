@@ -146,7 +146,16 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	// TODO: change type of spec.children to a map instead of list
+	if ipman.Status.CharonProxyIP == "" {
+		writeResponseDenied(w, in, "Charon proxy is not yet ready")
+	}
+
+	_, ok = ipman.Status.XfrmGatewayIPs[ipmanChild.Name]
+	if !ok {
+		writeResponseDenied(w, in, "XfrmPod for that child is not ready yet")
+		return
+	}
+
 	remoteJson, _ := json.Marshal(ipmanChild.RemoteIps)
 	localJson, _ := json.Marshal(ipmanChild.LocalIps)
 	annotations := map[string]string{
