@@ -79,8 +79,8 @@ nix-build:
 	nix run .#restctlImage.copyToRegistry
 
 vxlandlord:
-	docker build -t plan9better/vxlandlord:1.0.0 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
-	docker push plan9better/vxlandlord:1.0.0 
+	docker build -t plan9better/vxlandlord:1.0.1 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
+	docker push plan9better/vxlandlord:1.0.1 
 xfrminion:
 	docker build -t plan9better/xfrminion:1.0.0 --platform linux/amd64 --file ./xfrminion.Dockerfile .
 	docker push plan9better/xfrminion:1.0.0 

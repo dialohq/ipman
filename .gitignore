@@ -1,2 +1,4 @@
-./certs
-./samples
+certs
+samples
+result
+kubeconfig

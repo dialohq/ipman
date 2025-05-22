@@ -5,16 +5,17 @@ metadata:
   namespace: ims
 spec:
   name: "3s"
-  remoteAddr: "xxx.xxx.xxx.xxx"
-  localAddr: "xxx.xxx.xxx.xxx"
-  localId: "xxx.xxx.xxx.xxx"
-  remoteId: "xxx.xxx.xxx.xxx"
+  remoteAddr: "13.51.6.188"
+  localAddr: "145.239.135.194"
+  localId: "145.239.135.194"
+  remoteId: "13.51.6.188"
   secretRef:
     name: "ipsec-secret"
     namespace: "default"
     key: "psk"
   children:
     3s:
+      esp_proposals: aes256-sha256-ecp256
       name: "3s"
       local_ips:
         - "10.0.2.0/24"
@@ -36,6 +37,7 @@ spec:
           - "10.0.2.10/24"
     4s:
       name: "4s"
+      esp_proposals: aes256-sha256-ecp256
       local_ips:
         - "10.0.4.4/32"
         - "10.0.9.8/32"

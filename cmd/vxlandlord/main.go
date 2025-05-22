@@ -16,8 +16,9 @@ import (
 )
 
 func createVxlan(underlying *ip.Link, local_ip net.IP, id int) (*ip.Link, error) {
+	vxlanName := "vxlan" + strconv.FormatInt(int64(id), 10)
 	a := &ip.LinkAttrs{
-		Name:    "vxlan" + strconv.FormatInt(int64(id), 10),
+		Name:    vxlanName,
 		NetNsID: -1,
 		TxQLen:  -1,
 	}
@@ -32,6 +33,16 @@ func createVxlan(underlying *ip.Link, local_ip net.IP, id int) (*ip.Link, error)
 
 	err := ip.LinkAdd(vxlanTemplate)
 	if err != nil {
+		link, err2 := ip.LinkByName(vxlanName)
+		if err2 != nil {
+			err2 = fmt.Errorf("Error creating interface (%w), error getting link by name: %w", err, err2)
+			return nil, err2
+		}
+		err2 = ip.LinkDel(link)
+		if err2 != nil {
+			err2 = fmt.Errorf("Error creating interface (%w), error deleting link: %w", err, err2)
+			return nil, err2
+		}
 		return nil, err
 	}
 	vxlan, err := ip.LinkByName(a.Name)

@@ -6,6 +6,7 @@
     flake-utils.url = "github:numtide/flake-utils";
     nix2container.url = "github:nlewo/nix2container";
     nix-filter.url = "github:numtide/nix-filter";
+    nixidy.url = "github:dialohq/nixidy/d010752e7f24ddaeedbdaf46aba127ca89d1483a";
   };
 
   outputs = {
@@ -53,33 +54,33 @@
         packages = {
           operator = operator;
           operatorImage = operatorImage;
-        };
 
-        devShells.default = pkgs.mkShell {
-          packages = with pkgs; [
-            go
-            gopls
-            gnumake
-            tokei # loc count
-            dockerfile-language-server-nodejs
-            yaml-language-server
-            yamlfmt
-            kuttl # kubernetes tests
-            kubernetes-helm
-            helm-ls
-          ];
-          shellHook = ''
-            zsh
-            go mod tidy
-          '';
-          env = {
-            KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
-            CHARON_POD_NAME = "charon-pod";
-            XFRM_POD_NAME = "xfrm-pod";
-            NAMESPACE_NAME = "ims";
-            API_SOCKET_PATH = "/restctlsock/restctl.sock";
-            PROXY_SOCKET_DIR = "/var/run/restctl";
-            EDITOR = "hx";
+          devShells.default = pkgs.mkShell {
+            packages = with pkgs; [
+              go
+              gopls
+              gnumake
+              tokei # loc count
+              dockerfile-language-server-nodejs
+              yaml-language-server
+              yamlfmt
+              kuttl # kubernetes tests
+              kubernetes-helm
+              helm-ls
+            ];
+            shellHook = ''
+              zsh
+              go mod tidy
+            '';
+            env = {
+              KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
+              CHARON_POD_NAME = "charon-pod";
+              XFRM_POD_NAME = "xfrm-pod";
+              NAMESPACE_NAME = "ims";
+              API_SOCKET_PATH = "/restctlsock/restctl.sock";
+              PROXY_SOCKET_DIR = "/var/run/restctl";
+              EDITOR = "hx";
+            };
           };
         };
       }
