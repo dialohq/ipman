@@ -162,14 +162,6 @@ func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connN
 						Value: "1",
 					},
 					{
-						Name:  "net.ipv4.conf.all.rp_filter",
-						Value: "0",
-					},
-					{
-						Name:  "net.ipv4.conf.default.rp_filter",
-						Value: "0",
-					},
-					{
 						Name:  "net.ipv4.conf.all.arp_filter",
 						Value: "1",
 					},

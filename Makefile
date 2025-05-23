@@ -81,5 +81,5 @@ restctl:
 	docker build -t plan9better/restctl:0.0.1-1 --platform linux/amd64 --file ./restctl.Dockerfile .
 	docker push plan9better/restctl:0.0.1-1 
 operator:
-	docker build -t plan9better/operator:0.0.1-2 --platform linux/amd64 --file ./operator.Dockerfile .
-	docker push plan9better/operator:0.0.1-2 
+	docker build -t plan9better/operator:0.0.1-3 --platform linux/amd64 --file ./operator.Dockerfile .
+	docker push plan9better/operator:0.0.1-3 
