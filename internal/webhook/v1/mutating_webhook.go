@@ -167,6 +167,10 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		ipmanv1.AnnotationXfrmUnderlyingIp: ipman.Status.XfrmGatewayIPs[ipmanChild.Name],
 	}
 	ip := pool[0]
+	if val, ok := ipman.Status.XfrmGatewayIPs[ipmanChild.Name]; !ok || val == "" {
+		writeResponseDenied(w, in, "XfrmGateway not yet assigned an ip")
+		return
+	}
 	patch := patch(&pod, ip, ipman.Status.XfrmGatewayIPs[ipmanChild.Name], annotations, *ipmanChild, wh.Env.VxlandlordImage)
 	ipman.Status.FreeIPs[ipmanChild.Name][poolName] = slices.Delete(ipman.Status.FreeIPs[ipmanChild.Name][poolName], 0, 1)
 	if ipman.Status.PendingIPs == nil {

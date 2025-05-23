@@ -46,6 +46,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 			return nil, nil, fmt.Errorf("Failed to find secret(%s): %w", "secretName", err)
 		}
 		cdl = append(cdl, ipmanv1.ConnData{Secret: string(sec.Data[im.Spec.SecretRef.Key]), Ipman: im})
+		logger.Info("Found secret for ipman", "secret", sec, "ipman", im, "cdls", cdl)
 	}
 
 	serializedConfig := ipman.Spec.SerializeAllToConf(cdl)
@@ -255,7 +256,7 @@ func (r *IpmanReconciler) createConfInitContainer(serializedConfig string) corev
 		Image:           ipmanv1.CharonCreateConfImage + ":" + ipmanv1.CharonCreateConfImageTag,
 		Command: []string{
 			"sh", "-c",
-			fmt.Sprintf("echo '%s' > %s/swanctl.conf && chmod 666 %s/swanctl.conf",
+			fmt.Sprintf("echo '%s' > %sswanctl.conf && chmod 666 %sswanctl.conf && touch /etc/strongswan.conf",
 				serializedConfig, ipmanv1.CharonConfVolumeMountPath, ipmanv1.CharonConfVolumeMountPath),
 		},
 		VolumeMounts: []corev1.VolumeMount{

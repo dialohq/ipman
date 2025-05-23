@@ -21,9 +21,10 @@ import (
 )
 
 var (
-	SWANCTL_CONF_PATH = ipmanv1.CharonConfVolumeMountPath + "swanctl.conf"
-	CHARON_CONN       = ipmanv1.CharonConnVolumeMountPath
-	API_SOCKET_PATH   = ipmanv1.CharonApiSocketVolumePath + "restctl.sock"
+	STRONGSWAN_CONF_PATH = "/etc/strongswan.conf"
+	SWANCTL_CONF_PATH    = ipmanv1.CharonConfVolumeMountPath + "swanctl.conf"
+	CHARON_CONN          = ipmanv1.CharonConnVolumeMountPath
+	API_SOCKET_PATH      = ipmanv1.CharonApiSocketVolumePath + "restctl.sock"
 )
 
 type CommandResponse struct {
@@ -283,6 +284,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	os.WriteFile(STRONGSWAN_CONF_PATH, []byte{}, os.ModePerm)
 
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
