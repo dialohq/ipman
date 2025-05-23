@@ -9,6 +9,6 @@ entries:
       name: ipman
       type: application
       urls:
-        - https://github.com/dialohq/ipman/releases/download/release/ipman-0.0.1.tgz/ipman-0.0.1.tgz
+        - https://github.com/dialohq/ipman/releases/download/release/ipman-0.0.1.tgz
       version: 0.0.1
 generated: "2025-05-23T09:36:28.70065+02:00"
