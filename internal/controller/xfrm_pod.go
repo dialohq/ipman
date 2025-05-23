@@ -156,18 +156,6 @@ func (r *IPSecConnectionReconciler) createXfrmPod(c *ipmanv1.Child, ipsecconnect
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
 			HostPID:       true,
-			SecurityContext: &corev1.PodSecurityContext{
-				Sysctls: []corev1.Sysctl{
-					{
-						Name:  "net.ipv4.ip_forward",
-						Value: "1",
-					},
-					{
-						Name:  "net.ipv4.conf.all.arp_filter",
-						Value: "1",
-					},
-				},
-			},
 			Containers: []corev1.Container{
 				{
 					Name:            ipmanv1.XfrminionContainerName,

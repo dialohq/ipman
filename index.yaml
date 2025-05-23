@@ -3,12 +3,12 @@ entries:
   ipman:
     - apiVersion: v2
       appVersion: 1.16.0
-      created: "2025-05-23T17:42:08.102102+02:00"
+      created: "2025-05-23T18:05:50.704632+02:00"
       description: A Helm chart for Kubernetes
-      digest: 05dbb53ae4129a49b09b3f4417acb69d21388054297f2724d12d9b146b849ce0
+      digest: 895113c92f269dde004d8aaa1510f5ac4882c9d698d7b43ee3e5ec71df62cd90
       name: ipman
       type: application
       urls:
-        - https://github.com/dialohq/ipman/releases/download/v0.0.3/ipman-0.0.3.tgz
-      version: 0.0.3
-generated: "2025-05-23T17:42:08.101623+02:00"
+        - https://github.com/dialohq/ipman/releases/download/v0.0.4/ipman-0.0.4.tgz
+      version: 0.0.4
+generated: "2025-05-23T18:05:50.701432+02:00"
