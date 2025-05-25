@@ -46,6 +46,8 @@ spec:
               value: {{ .Values.RestctlImage }}
             - name: CHARONDAEMON_IMAGE
               value: {{ .Values.CharondaemonImage}}
+            - name: CADDY_IMAGE
+              value: {{ .Values.CaddyImage }}
             - name: PROXY_SOCKET_PATH
               value: {{ .Values.ProxySocketPath }}
             - name: CHARON_SOCKET_PATH
