@@ -332,6 +332,7 @@ func (r *IpmanReconciler) createRestctlPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 				createRestctlSocketVolume(),
 			},
 			HostNetwork: true,
+			HostPID:     true,
 			Containers: []corev1.Container{
 				r.createRestCtlContainer(),
 			},
