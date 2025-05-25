@@ -45,8 +45,7 @@ func main() {
 		RestctlImage:      os.Getenv("RESTCTL_IMAGE"),
 		CaddyImage:        os.Getenv("CADDY_IMAGE"),
 		CharonDaemonImage: os.Getenv("CHARONDAEMON_IMAGE"),
-		ProxySocketPath:   os.Getenv("PROXY_SOCKET_PATH"),
-		CharonSocketPath:  os.Getenv("CHARON_SOCKET_PATH"),
+		HostSocketsPath:   os.Getenv("HOST_SOCKETS_PATH"),
 	}
 
 	logger.Info("Creating controller")

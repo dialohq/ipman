@@ -4,8 +4,7 @@
 # This will set the replicaset count more information can be found here: https://kubernetes.io/docs/concepts/workloads/controllers/replicaset/
 replicaCount: 1
 # This sets the container image more information can be found here: https://kubernetes.io/docs/concepts/containers/images/
-ProxySocketPath: "/var/run/restctl"
-CharonSocketPath: "/var/run/"
+CharonSocketsPath: "/var/run/ipman"
 systemNamespace: "ipman-system"
 WebhookServiceName: "ipman-webhook-service"
 CertificateName: "ipman-webhook-certificate"

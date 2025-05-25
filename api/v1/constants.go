@@ -22,6 +22,7 @@ const (
 	InterfaceRequestContainerName = "iface-request"
 
 	CharonPodName                   = "charon-pod" // keep this 2 part seperated with '-'
+	RestctlPodName                  = "restctl-pod"
 	CharonSocketVolumeName          = "charon-volume"
 	CharonSocketVolumeMountPath     = "/var/run/" // ENV VAR
 	CharonConfVolumeName            = "charon-conf"
