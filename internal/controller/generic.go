@@ -12,7 +12,7 @@ import (
 )
 
 // rke2 requires seccomp profile set to runtime default or localhost
-func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
+func (r *IPSecConnectionReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
 	// TODO: figure out exactly which
 	// container require what and make
 	// this more specific. charon pod
@@ -31,14 +31,14 @@ func (r *IpmanReconciler) createDefaultSecurityContext() *corev1.SecurityContext
 	}
 }
 
-func (r *IpmanReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext {
+func (r *IPSecConnectionReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext {
 	def := r.createDefaultSecurityContext()
 	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"}
 	return def
 
 }
 
-func (r *IpmanReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
+func (r *IPSecConnectionReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
 	def := r.createDefaultSecurityContext()
 	return def
 }

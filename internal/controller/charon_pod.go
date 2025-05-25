@@ -16,46 +16,46 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func (r *IpmanReconciler) charonPodNsn(ipmanName string) types.NamespacedName {
+func (r *IPSecConnectionReconciler) charonPodNsn(ipsecconnectionName string) types.NamespacedName {
 	ns := r.Env.NamespaceName
 	nameEnv := ipmanv1.CharonPodName
 
-	name := strings.Join([]string{nameEnv, ipmanName}, "-")
+	name := strings.Join([]string{nameEnv, ipsecconnectionName}, "-")
 	return types.NamespacedName{
 		Name:      name,
 		Namespace: ns,
 	}
 }
 
-func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ipman) (*corev1.Pod, *corev1.Pod, error) {
+func (r *IPSecConnectionReconciler) ensureCharonPod(ctx context.Context, ipsecconnection *ipmanv1.IPSecConnection) (*corev1.Pod, *corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
-	list := &ipmanv1.IpmanList{}
+	list := &ipmanv1.IPSecConnectionList{}
 	err := r.List(ctx, list)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Couldn't fetch list of ipmen to reload charon pod: %w", err)
+		return nil, nil, fmt.Errorf("Couldn't fetch list of ipsecconnections to reload charon pod: %w", err)
 	}
 	cdl := []ipmanv1.ConnData{}
-	for _, im := range list.Items {
+	for _, ipsecconn := range list.Items {
 		sec := &corev1.Secret{}
 		err := r.Get(ctx, types.NamespacedName{
-			Name:      ipman.Spec.SecretRef.Name,
-			Namespace: ipman.Spec.SecretRef.Namespace}, sec)
+			Name:      ipsecconnection.Spec.SecretRef.Name,
+			Namespace: ipsecconnection.Spec.SecretRef.Namespace}, sec)
 		if err != nil {
 			return nil, nil, fmt.Errorf("Failed to find secret(%s): %w", "secretName", err)
 		}
-		cdl = append(cdl, ipmanv1.ConnData{Secret: string(sec.Data[im.Spec.SecretRef.Key]), Ipman: im})
-		logger.Info("Found secret for ipman", "secret", sec, "ipman", im, "cdls", cdl)
+		cdl = append(cdl, ipmanv1.ConnData{Secret: string(sec.Data[ipsecconn.Spec.SecretRef.Key]), IPSecConnection: ipsecconn})
+		logger.Info("Found secret for ipsecconnection", "secret", sec, "ipsecconnection", ipsecconn, "cdls", cdl)
 	}
 
-	serializedConfig := ipman.Spec.SerializeAllToConf(cdl)
+	serializedConfig := ipsecconnection.Spec.SerializeAllToConf(cdl)
 
 	charonPod := &corev1.Pod{}
-	err = r.Get(ctx, r.charonPodNsn(ipman.Spec.NodeName), charonPod)
+	err = r.Get(ctx, r.charonPodNsn(ipsecconnection.Spec.NodeName), charonPod)
 	if apierrors.IsNotFound(err) {
 		// wait for service to pick up webhooks
 		for {
-			charonPod = r.createCharonPod(ipman)
+			charonPod = r.createCharonPod(ipsecconnection)
 			if err := r.Create(ctx, charonPod); err != nil {
 				if apierrors.IsInternalError(err) {
 					logger.Info("Couldn't create charon pod", "error", err)
@@ -74,13 +74,13 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 		return nil, nil, err
 	}
 
-	charonPod, err = waitForPodReady(charonPod, r.charonPodNsn(ipman.Spec.NodeName), r.Get)
+	charonPod, err = waitForPodReady(charonPod, r.charonPodNsn(ipsecconnection.Spec.NodeName), r.Get)
 	if err != nil {
 		logger.Error(err, "Error while waiting for charon pod to be ready")
 		return nil, nil, err
 	}
 
-	_, err = r.ensureRestctlPod(ctx, ipman)
+	_, err = r.ensureRestctlPod(ctx, ipsecconnection)
 	if err != nil {
 		logger.Error(err, "Couldn't ensure restctl pod")
 		return nil, nil, err
@@ -101,7 +101,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 	return charonPod, proxyPod, nil
 }
 
-func (r *IpmanReconciler) sendConfigToCharonPod(ctx context.Context, restctlPod *corev1.Pod, serializedConfig string) error {
+func (r *IPSecConnectionReconciler) sendConfigToCharonPod(ctx context.Context, restctlPod *corev1.Pod, serializedConfig string) error {
 	logger := log.FromContext(ctx)
 
 	url := "http://" + restctlPod.Status.PodIP + "/reload"
@@ -124,10 +124,10 @@ func (r *IpmanReconciler) sendConfigToCharonPod(ctx context.Context, restctlPod 
 	return nil
 }
 
-func (r *IpmanReconciler) createCharonPod(ipman *ipmanv1.Ipman) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createCharonPod(ipsecconnection *ipmanv1.IPSecConnection) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ipmanv1.CharonPodName + "-" + ipman.Spec.NodeName,
+			Name:      ipmanv1.CharonPodName + "-" + ipsecconnection.Spec.NodeName,
 			Namespace: r.Env.NamespaceName,
 			Labels: map[string]string{
 				ipmanv1.CharonPodServiceAnnotation: "true", // to get picked up by the service
@@ -135,7 +135,7 @@ func (r *IpmanReconciler) createCharonPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 		},
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
-				"kubernetes.io/hostname": ipman.Spec.NodeName,
+				"kubernetes.io/hostname": ipsecconnection.Spec.NodeName,
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
 			Volumes: []corev1.Volume{
@@ -153,7 +153,7 @@ func (r *IpmanReconciler) createCharonPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 	}
 }
 
-func (r *IpmanReconciler) ensureCharonProxy(nodeName string) (*corev1.Pod, error) {
+func (r *IPSecConnectionReconciler) ensureCharonProxy(nodeName string) (*corev1.Pod, error) {
 	ctx := context.Background()
 	logger := log.FromContext(ctx)
 
@@ -177,14 +177,14 @@ func (r *IpmanReconciler) ensureCharonProxy(nodeName string) (*corev1.Pod, error
 	return proxyPod, nil
 }
 
-func (r *IpmanReconciler) proxyPodNsn(name string) types.NamespacedName {
+func (r *IPSecConnectionReconciler) proxyPodNsn(name string) types.NamespacedName {
 	return types.NamespacedName{
 		Name:      name,
 		Namespace: r.Env.NamespaceName,
 	}
 }
 
-func (r *IpmanReconciler) createCharonProxyPod(proxyPodName, nodeName string) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createCharonProxyPod(proxyPodName, nodeName string) *corev1.Pod {
 	url := fmt.Sprintf("unix/%s%s", ipmanv1.CharonApiSocketVolumePath, "restctl.sock")
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -218,7 +218,7 @@ func (r *IpmanReconciler) createCharonProxyPod(proxyPodName, nodeName string) *c
 	}
 }
 
-func (r *IpmanReconciler) createCharonDaemonContainer() corev1.Container {
+func (r *IPSecConnectionReconciler) createCharonDaemonContainer() corev1.Container {
 	return corev1.Container{
 		ImagePullPolicy: corev1.PullAlways,
 		Name:            ipmanv1.CharonDaemonContainerName,
@@ -231,7 +231,7 @@ func (r *IpmanReconciler) createCharonDaemonContainer() corev1.Container {
 	}
 }
 
-func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
+func (r *IPSecConnectionReconciler) createRestCtlContainer() corev1.Container {
 	return corev1.Container{
 		ImagePullPolicy: corev1.PullAlways,
 		Name:            ipmanv1.CharonRestctlContainerName,
@@ -251,7 +251,7 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 	}
 }
 
-func (r *IpmanReconciler) ensureRestctlPod(ctx context.Context, ipman *ipmanv1.Ipman) (*corev1.Pod, error) {
+func (r *IPSecConnectionReconciler) ensureRestctlPod(ctx context.Context, ipman *ipmanv1.IPSecConnection) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	restctlPod := &corev1.Pod{}
@@ -285,7 +285,7 @@ func (r *IpmanReconciler) ensureRestctlPod(ctx context.Context, ipman *ipmanv1.I
 	return restctlPod, nil
 }
 
-func (r *IpmanReconciler) restctlPodNsn(nodeName string) types.NamespacedName {
+func (r *IPSecConnectionReconciler) restctlPodNsn(nodeName string) types.NamespacedName {
 	ns := r.Env.NamespaceName
 	name := "restctl-pod-" + nodeName
 	return types.NamespacedName{
@@ -294,7 +294,7 @@ func (r *IpmanReconciler) restctlPodNsn(nodeName string) types.NamespacedName {
 	}
 }
 
-func (r *IpmanReconciler) createRestctlPod(ipman *ipmanv1.Ipman) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createRestctlPod(ipman *ipmanv1.IPSecConnection) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      strings.Join([]string{ipmanv1.RestctlPodName, ipman.Spec.NodeName}, "-"),

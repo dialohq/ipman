@@ -54,8 +54,8 @@ type StateRequestData struct {
 }
 
 type StateResponseData struct {
-	Ipman ipmanv1.Ipman `json:"ipman"`
-	Error string        `json:"error"`
+	Ipman ipmanv1.IPSecConnection `json:"ipman"`
+	Error string                  `json:"error"`
 }
 
 type PidResponseData struct {
@@ -69,7 +69,7 @@ type AddRoutesResponseData struct {
 
 type ConnData struct {
 	Secret string
-	Ipman  ipmanv1.Ipman
+	Ipman  ipmanv1.IPSecConnection
 }
 
 func SendPost[T any](url string, data T) (*http.Response, error) {

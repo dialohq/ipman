@@ -41,16 +41,16 @@ func TestGetAction(t *testing.T) {
 	}
 }
 
-// TestValidateIpmanUpdate tests validateIpmanUpdate function for various scenarios.
-func TestValidateIpmanUpdate(t *testing.T) {
-	ipmanName := "ip1"
+// TestValidateIPSecConnectionUpdate tests validateIPSecConnectionUpdate function for various scenarios.
+func TestValidateIPSecConnectionUpdate(t *testing.T) {
+	ipsecconnectionName := "ip1"
 	// Define children for tests
 	child1 := ipmanv1.Child{Name: "c1", IpPools: map[string][]string{"pool1": {"1.1.1.1"}}}
 	child1More := ipmanv1.Child{Name: "c1", IpPools: map[string][]string{"pool1": {"1.1.1.1", "2.2.2.2"}}}
 	child2 := ipmanv1.Child{Name: "c2", IpPools: map[string][]string{"pool2": {}}}
 
-	podUsingC2 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/ipmanName": ipmanName, "ipman.dialo.ai/childName": "c2"}}}
-	podUsingDeletedIP := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/ipmanName": ipmanName, "ipman.dialo.ai/childName": "c1", "ipman.dialo.ai/vxlanIp": "2.2.2.2"}}}
+	podUsingC2 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/ipmanName": ipsecconnectionName, "ipman.dialo.ai/childName": "c2"}}}
+	podUsingDeletedIP := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/ipmanName": ipsecconnectionName, "ipman.dialo.ai/childName": "c1", "ipman.dialo.ai/vxlanIp": "2.2.2.2"}}}
 
 	tests := []struct {
 		name            string
@@ -69,11 +69,11 @@ func TestValidateIpmanUpdate(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			newIpman := ipmanv1.Ipman{ObjectMeta: metav1.ObjectMeta{Name: ipmanName}, Spec: ipmanv1.IpmanSpec{Children: tt.newChildren}}
-			oldIpman := ipmanv1.Ipman{ObjectMeta: metav1.ObjectMeta{Name: ipmanName}, Spec: ipmanv1.IpmanSpec{Children: tt.oldChildren}}
-			ok, err := validateIpmanUpdate(newIpman, oldIpman, tt.pods)
+			newIPSecConnection := ipmanv1.IPSecConnection{ObjectMeta: metav1.ObjectMeta{Name: ipsecconnectionName}, Spec: ipmanv1.IPSecConnectionSpec{Children: tt.newChildren}}
+			oldIPSecConnection := ipmanv1.IPSecConnection{ObjectMeta: metav1.ObjectMeta{Name: ipsecconnectionName}, Spec: ipmanv1.IPSecConnectionSpec{Children: tt.oldChildren}}
+			ok, err := validateIPSecConnectionUpdate(newIPSecConnection, oldIPSecConnection, tt.pods)
 			if ok != tt.wantOK {
-				t.Errorf("%s validateIpmanUpdate ok = %v, want %v", tt.name, ok, tt.wantOK)
+				t.Errorf("%s validateIPSecConnectionUpdate ok = %v, want %v", tt.name, ok, tt.wantOK)
 			}
 			if tt.wantErrContains != "" {
 				if err == nil {
@@ -88,7 +88,7 @@ func TestValidateIpmanUpdate(t *testing.T) {
 	}
 }
 
-// TestValidateIpmanUpdate tests validateIpmanUpdate function for various scenarios.
+// TestValidateIPSecConnectionUpdate tests validateIPSecConnectionUpdate function for various scenarios.
 func TestNoPatchResponse(t *testing.T) {
 	in := &admissionv1.AdmissionReview{Request: &admissionv1.AdmissionRequest{UID: "test-uid"}}
 	got := noPatchResponse(in)
@@ -162,36 +162,36 @@ func TestCanDeleteXfrm(t *testing.T) {
 	}
 }
 
-func TestValidateIpmanDeletion(t *testing.T) {
+func TestValidateIPSecConnectionDeletion(t *testing.T) {
 	// invalid JSON
 	req := &admissionv1.AdmissionRequest{OldObject: runtime.RawExtension{Raw: []byte("invalid")}}
-	ok, err := validateIpmanDeletion(req, nil, nil)
+	ok, err := validateIPSecConnectionDeletion(req, nil, nil)
 	if err == nil && ok {
 		t.Error("expected error, got none")
 	}
 	// no xfrm pods
-	ipman := &ipmanv1.Ipman{Spec: ipmanv1.IpmanSpec{Children: map[string]ipmanv1.Child{"c1": {Name: "c1"}}}}
-	raw, _ := json.Marshal(ipman)
+	ipsecconnection := &ipmanv1.IPSecConnection{Spec: ipmanv1.IPSecConnectionSpec{Children: map[string]ipmanv1.Child{"c1": {Name: "c1"}}}}
+	raw, _ := json.Marshal(ipsecconnection)
 	req2 := &admissionv1.AdmissionRequest{OldObject: runtime.RawExtension{Raw: raw}}
-	ok2, err2 := validateIpmanDeletion(req2, nil, nil)
+	ok2, err2 := validateIPSecConnectionDeletion(req2, nil, nil)
 	if err2 != nil || !ok2 {
 		t.Errorf("expected ok, got ok=%v err=%v", ok2, err2)
 	}
 	// xfrm with child in spec
 	xfrm1 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/childName": "c1"}}}
-	ok3, err3 := validateIpmanDeletion(req2, nil, []corev1.Pod{xfrm1})
+	ok3, err3 := validateIPSecConnectionDeletion(req2, nil, []corev1.Pod{xfrm1})
 	if err3 != nil || !ok3 {
 		t.Errorf("expected ok, got ok=%v err=%v", ok3, err3)
 	}
 	// xfrm with child not in spec, no workers
 	xfrm2 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/childName": "c2"}}}
-	ok4, err4 := validateIpmanDeletion(req2, nil, []corev1.Pod{xfrm2})
+	ok4, err4 := validateIPSecConnectionDeletion(req2, nil, []corev1.Pod{xfrm2})
 	if err4 != nil || !ok4 {
 		t.Errorf("expected ok, got ok=%v err=%v", ok4, err4)
 	}
 }
 
-func TestValidateIpmanCreation(t *testing.T) {
+func TestValidateIPSecConnectionCreation(t *testing.T) {
 	otherPods := []corev1.Pod{
 		{
 			ObjectMeta: metav1.ObjectMeta{
@@ -225,35 +225,35 @@ func TestValidateIpmanCreation(t *testing.T) {
 			},
 		},
 	}
-	// no other ipmen, no pods
-	ipman1 := ipmanv1.Ipman{Spec: ipmanv1.IpmanSpec{Name: "ip1"}}
-	ok, err := validateIpmanCreation(ipman1, nil, nil)
+	// no other ipsecconnections, no pods
+	ipsecconnection1 := ipmanv1.IPSecConnection{Spec: ipmanv1.IPSecConnectionSpec{Name: "ip1"}}
+	ok, err := validateIPSecConnectionCreation(ipsecconnection1, nil, nil)
 	if !ok || err != nil {
 		t.Errorf("expected ok=true, got ok=%v, err=%v", ok, err)
 	}
-	// no other ipmen, irrelevant pods
-	ok1, err1 := validateIpmanCreation(ipman1, nil, otherPods)
+	// no other ipsecconnections, irrelevant pods
+	ok1, err1 := validateIPSecConnectionCreation(ipsecconnection1, nil, otherPods)
 	if !ok1 || err1 != nil {
 		t.Errorf("expected ok=true, got ok=%v, err=%v", ok1, err1)
 	}
-	// irrelevant ipman, irrelevant pods
-	ipman2 := ipmanv1.Ipman{Spec: ipmanv1.IpmanSpec{Name: "ip2"}}
-	ok2, err2 := validateIpmanCreation(ipman1, []ipmanv1.Ipman{ipman2}, otherPods)
+	// irrelevant ipsecconnection, irrelevant pods
+	ipsecconnection2 := ipmanv1.IPSecConnection{Spec: ipmanv1.IPSecConnectionSpec{Name: "ip2"}}
+	ok2, err2 := validateIPSecConnectionCreation(ipsecconnection1, []ipmanv1.IPSecConnection{ipsecconnection2}, otherPods)
 	if !ok2 || err2 != nil {
 		t.Errorf("expected ok=true, got ok=%v, err=%v", ok2, err2)
 	}
-	// duplicate ipman, irrelevant pods
-	ok3, err3 := validateIpmanCreation(ipman1, []ipmanv1.Ipman{ipman1}, otherPods)
+	// duplicate ipsecconnection, irrelevant pods
+	ok3, err3 := validateIPSecConnectionCreation(ipsecconnection1, []ipmanv1.IPSecConnection{ipsecconnection1}, otherPods)
 	if ok3 || err3 == nil {
 		t.Errorf("expected ok=false, err=nil, got ok=%v, err=%v", ok3, err3)
 	}
-	// no duplicate ipman, relevant pods
-	ok4, err4 := validateIpmanCreation(ipman1, nil, relevantPods)
+	// no duplicate ipsecconnection, relevant pods
+	ok4, err4 := validateIPSecConnectionCreation(ipsecconnection1, nil, relevantPods)
 	if ok4 || err4 == nil {
 		t.Errorf("expected ok=false, err!=nil, got ok=%v, err=%v", ok4, err4)
 	}
-	// duplicate ipman, relevant pods
-	ok5, err5 := validateIpmanCreation(ipman1, []ipmanv1.Ipman{ipman1}, relevantPods)
+	// duplicate ipsecconnection, relevant pods
+	ok5, err5 := validateIPSecConnectionCreation(ipsecconnection1, []ipmanv1.IPSecConnection{ipsecconnection1}, relevantPods)
 	if ok5 || err5 == nil {
 		t.Errorf("expected ok=false, err!=nil, got ok=%v, err=%v", ok5, err5)
 	}

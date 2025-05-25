@@ -16,27 +16,27 @@ func secretRefEqual(a, b SecretRef) bool {
 		a.Key == b.Key
 }
 
-type IpmanStatus struct {
+type IPSecConnectionStatus struct {
 	XfrmGatewayIPs map[string]string              `json:"xfrmGatewayIp"`
 	FreeIPs        map[string]map[string][]string `json:"freeIps"`
 	PendingIPs     map[string]string              `json:"pendingIps"`
 	CharonProxyIP  string                         `json:"charonProxyIp"`
 }
 
-type Ipman struct {
+type IPSecConnection struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   IpmanSpec   `json:"spec,omitempty"`
-	Status IpmanStatus `json:"status,omitempty"`
+	Spec   IPSecConnectionSpec   `json:"spec,omitempty"`
+	Status IPSecConnectionStatus `json:"status,omitempty"`
 }
 
-type IpmanList struct {
+type IPSecConnectionList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata"`
-	Items           []Ipman `json:"items"`
+	Items           []IPSecConnection `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&Ipman{}, &IpmanList{})
+	SchemeBuilder.Register(&IPSecConnection{}, &IPSecConnectionList{})
 }

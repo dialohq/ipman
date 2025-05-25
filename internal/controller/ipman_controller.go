@@ -35,14 +35,14 @@ type Envs struct {
 	CharonDaemonImage string
 }
 
-type IpmanReconciler struct {
+type IPSecConnectionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	Env    Envs
 }
 
-func (r *IpmanReconciler) isReconcilingKindIpman(ctx context.Context, req reconcile.Request) (bool, error) {
-	im := &ipmanv1.Ipman{}
+func (r *IPSecConnectionReconciler) isReconcilingKindIPSecConnection(ctx context.Context, req reconcile.Request) (bool, error) {
+	im := &ipmanv1.IPSecConnection{}
 	err := r.Get(ctx, req.NamespacedName, im)
 	if err != nil {
 		if apierrors.IsNotFound(err) {
@@ -53,7 +53,7 @@ func (r *IpmanReconciler) isReconcilingKindIpman(ctx context.Context, req reconc
 	return true, nil
 }
 
-func (r *IpmanReconciler) isReconcilingKindPod(ctx context.Context, req reconcile.Request) (bool, error) {
+func (r *IPSecConnectionReconciler) isReconcilingKindPod(ctx context.Context, req reconcile.Request) (bool, error) {
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, req.NamespacedName, pod)
 	if err != nil {
@@ -69,30 +69,30 @@ func (r *IpmanReconciler) isReconcilingKindPod(ctx context.Context, req reconcil
 	return true, nil
 }
 
-// returns time after which to requeue ipman
-func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Context) (*time.Duration, error) {
+// returns time after which to requeue ipsecconnection
+func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection *ipmanv1.IPSecConnection, ctx context.Context) (*time.Duration, error) {
 	logger := log.FromContext(ctx)
 
-	if ipman.Status.FreeIPs == nil {
-		ipman.Status.FreeIPs = map[string]map[string][]string{}
+	if ipsecconnection.Status.FreeIPs == nil {
+		ipsecconnection.Status.FreeIPs = map[string]map[string][]string{}
 	}
 
-	for k := range ipman.Status.FreeIPs {
-		if _, ok := ipman.Spec.Children[k]; !ok {
-			delete(ipman.Status.FreeIPs, k)
+	for k := range ipsecconnection.Status.FreeIPs {
+		if _, ok := ipsecconnection.Spec.Children[k]; !ok {
+			delete(ipsecconnection.Status.FreeIPs, k)
 		}
 	}
 
-	for childName, c := range ipman.Spec.Children {
-		if ipman.Status.FreeIPs[childName] == nil {
-			ipman.Status.FreeIPs[childName] = map[string][]string{}
+	for childName, c := range ipsecconnection.Spec.Children {
+		if ipsecconnection.Status.FreeIPs[childName] == nil {
+			ipsecconnection.Status.FreeIPs[childName] = map[string][]string{}
 		}
 		for poolName, ips := range c.IpPools {
-			if ipman.Status.FreeIPs[childName][poolName] == nil {
-				ipman.Status.FreeIPs[childName][poolName] = []string{}
+			if ipsecconnection.Status.FreeIPs[childName][poolName] == nil {
+				ipsecconnection.Status.FreeIPs[childName][poolName] = []string{}
 			}
 
-			ipman.Status.FreeIPs[childName][poolName] = slices.Clone(ips)
+			ipsecconnection.Status.FreeIPs[childName][poolName] = slices.Clone(ips)
 		}
 	}
 
@@ -104,7 +104,7 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 	}
 
 	childNames := []string{}
-	for childName := range ipman.Spec.Children {
+	for childName := range ipsecconnection.Spec.Children {
 		childNames = append(childNames, childName)
 	}
 
@@ -117,7 +117,7 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 
 	// TODO: if it turns out it's taking too long we can reverse sort by
 	// timestamp and stop after we reach the first still valid
-	maps.DeleteFunc(ipman.Status.PendingIPs, func(ip string, timestamp string) bool {
+	maps.DeleteFunc(ipsecconnection.Status.PendingIPs, func(ip string, timestamp string) bool {
 		ts, err := time.Parse(time.Layout, timestamp)
 		if err != nil {
 			logger.Error(err, "Malformed timestamp in pending ips", "timestamp", timestamp)
@@ -136,22 +136,22 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 		podIpList = append(podIpList, p.Annotations[ipmanv1.AnnotationVxlanIp])
 	}
 
-	for cn, pools := range ipman.Status.FreeIPs {
-		if ipman.Status.FreeIPs[cn] == nil {
-			ipman.Status.FreeIPs[cn] = map[string][]string{}
+	for cn, pools := range ipsecconnection.Status.FreeIPs {
+		if ipsecconnection.Status.FreeIPs[cn] == nil {
+			ipsecconnection.Status.FreeIPs[cn] = map[string][]string{}
 		}
 		for poolName := range pools {
-			if ipman.Status.FreeIPs[cn][poolName] == nil {
-				ipman.Status.FreeIPs[cn][poolName] = []string{}
+			if ipsecconnection.Status.FreeIPs[cn][poolName] == nil {
+				ipsecconnection.Status.FreeIPs[cn][poolName] = []string{}
 			}
-			pendingIps := slices.Collect(maps.Keys(ipman.Status.PendingIPs))
-			ipman.Status.FreeIPs[cn][poolName] = slices.DeleteFunc(ipman.Status.FreeIPs[cn][poolName], func(ip string) bool {
+			pendingIps := slices.Collect(maps.Keys(ipsecconnection.Status.PendingIPs))
+			ipsecconnection.Status.FreeIPs[cn][poolName] = slices.DeleteFunc(ipsecconnection.Status.FreeIPs[cn][poolName], func(ip string) bool {
 				return slices.Contains(pendingIps, ip) || slices.Contains(podIpList, ip)
 			})
 		}
 	}
 
-	p := slices.Collect(maps.Values(ipman.Status.PendingIPs))
+	p := slices.Collect(maps.Values(ipsecconnection.Status.PendingIPs))
 	sortedPending := []time.Duration{}
 	for _, v := range p {
 		// ignored since already checked above
@@ -167,56 +167,56 @@ func (r *IpmanReconciler) updateIpmanStatus(ipman *ipmanv1.Ipman, ctx context.Co
 	return &requeueIn, nil
 }
 
-func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Request) error {
+func (r *IPSecConnectionReconciler) reconcileIPSecConnection(ctx context.Context, req reconcile.Request) error {
 	logger := log.FromContext(ctx)
 
-	ipman := &ipmanv1.Ipman{}
-	if err := r.Get(ctx, req.NamespacedName, ipman); err != nil {
-		logger.Error(err, "Error getting ipman instance")
+	ipsecconnection := &ipmanv1.IPSecConnection{}
+	if err := r.Get(ctx, req.NamespacedName, ipsecconnection); err != nil {
+		logger.Error(err, "Error getting ipsecconnection instance")
 		return err
 	}
 
 	secret := &corev1.Secret{}
 	err := r.Get(ctx, types.NamespacedName{
-		Name:      ipman.Spec.SecretRef.Name,
-		Namespace: ipman.Spec.SecretRef.Namespace}, secret)
+		Name:      ipsecconnection.Spec.SecretRef.Name,
+		Namespace: ipsecconnection.Spec.SecretRef.Namespace}, secret)
 	if err != nil {
-		logger.Error(err, "Failed to find secret", "secretName", ipman.Spec.SecretRef.Name)
+		logger.Error(err, "Failed to find secret", "secretName", ipsecconnection.Spec.SecretRef.Name)
 		return err
 	}
 
-	_, proxyPod, err := r.ensureCharonPod(ctx, ipman)
+	_, proxyPod, err := r.ensureCharonPod(ctx, ipsecconnection)
 	if err != nil {
 		return fmt.Errorf("failed to ensure Charon pod: %w", err)
 	}
 
-	if err := r.Get(ctx, req.NamespacedName, ipman); err != nil {
-		logger.Error(err, "Error getting ipman instance to update status in ensuring charon pod")
+	if err := r.Get(ctx, req.NamespacedName, ipsecconnection); err != nil {
+		logger.Error(err, "Error getting ipsecconnection instance to update status in ensuring charon pod")
 		return err
 	}
 
-	ipman.Status.CharonProxyIP = proxyPod.Status.PodIP
-	err = r.Status().Update(ctx, ipman)
+	ipsecconnection.Status.CharonProxyIP = proxyPod.Status.PodIP
+	err = r.Status().Update(ctx, ipsecconnection)
 	if err != nil {
-		logger.Error(err, "Could't update status of ipman to add charon pod ip")
+		logger.Error(err, "Could't update status of ipsecconnection to add charon pod ip")
 		return err
 	}
 
-	for childName, c := range ipman.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipman.Spec.NodeName, ipman.Status.CharonProxyIP, ipman.Spec.Name, ipman.Name)
+	for childName, c := range ipsecconnection.Spec.Children {
+		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipsecconnection.Spec.NodeName, ipsecconnection.Status.CharonProxyIP, ipsecconnection.Spec.Name, ipsecconnection.Name)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 			return err
 		}
 
-		if ipman.Status.XfrmGatewayIPs == nil {
-			ipman.Status.XfrmGatewayIPs = map[string]string{}
+		if ipsecconnection.Status.XfrmGatewayIPs == nil {
+			ipsecconnection.Status.XfrmGatewayIPs = map[string]string{}
 		}
-		if ipman.Status.XfrmGatewayIPs[childName] != xfrmPod.Status.PodIP {
-			ipman.Status.XfrmGatewayIPs[childName] = xfrmPod.Status.PodIP
-			err = r.Status().Update(ctx, ipman)
+		if ipsecconnection.Status.XfrmGatewayIPs[childName] != xfrmPod.Status.PodIP {
+			ipsecconnection.Status.XfrmGatewayIPs[childName] = xfrmPod.Status.PodIP
+			err = r.Status().Update(ctx, ipsecconnection)
 			if err != nil {
-				logger.Error(err, "Error changing status of ipman", "ipman", ipman)
+				logger.Error(err, "Error changing status of ipsecconnection", "ipsecconnection", ipsecconnection)
 				return err
 			}
 		}
@@ -225,7 +225,7 @@ func (r *IpmanReconciler) reconcileIpman(ctx context.Context, req reconcile.Requ
 	return nil
 }
 
-func (r *IpmanReconciler) reconcilePod(ctx context.Context, req reconcile.Request) error {
+func (r *IPSecConnectionReconciler) reconcilePod(ctx context.Context, req reconcile.Request) error {
 	logger := log.FromContext(ctx)
 
 	pod := &corev1.Pod{}
@@ -253,21 +253,21 @@ func (r *IpmanReconciler) reconcilePod(ctx context.Context, req reconcile.Reques
 		return fmt.Errorf("Annotation interfaceid not present")
 	}
 
-	ipman := &ipmanv1.Ipman{}
+	ipsecconnection := &ipmanv1.IPSecConnection{}
 	err = r.Get(
 		ctx,
 		types.NamespacedName{
 			Name:      pod.Annotations[ipmanv1.AnnotationIpmanName],
 			Namespace: "",
 		},
-		ipman,
+		ipsecconnection,
 	)
 	if err != nil {
-		return fmt.Errorf("Couldn't fetch ipman while reconciling pod: %w", err)
+		return fmt.Errorf("Couldn't fetch ipsecconnection while reconciling pod: %w", err)
 	}
 
 	childName := pod.Annotations[ipmanv1.AnnotationChildName]
-	url := fmt.Sprintf("http://%s:8080/addEntry", ipman.Status.XfrmGatewayIPs[childName])
+	url := fmt.Sprintf("http://%s:8080/addEntry", ipsecconnection.Status.XfrmGatewayIPs[childName])
 	resp, err := comms.SendPost(url, comms.BridgeFdbRequest{
 		CiliumIp:    pod.Status.PodIP,
 		VxlanIp:     vxlanIp,
@@ -296,14 +296,14 @@ func res(rq *time.Duration, times ...time.Duration) ctrl.Result {
 	return ctrl.Result{RequeueAfter: min}
 }
 
-func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
+func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	var rq *time.Duration
-	iml := &ipmanv1.IpmanList{}
+	iml := &ipmanv1.IPSecConnectionList{}
 	err := r.List(ctx, iml)
 	if err != nil {
-		logger.Error(err, "Error listing ipmen")
+		logger.Error(err, "Error listing ipsecconnections")
 		return res(nil), err
 	}
 
@@ -311,33 +311,33 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 		success := false
 		for !success {
 			success = true
-			ipman := &ipmanv1.Ipman{}
+			ipsecconnection := &ipmanv1.IPSecConnection{}
 			err := r.Get(ctx, types.NamespacedName{
 				Namespace: im.Namespace,
 				Name:      im.Name,
-			}, ipman)
-			rq, err = r.updateIpmanStatus(ipman, ctx)
+			}, ipsecconnection)
+			rq, err = r.updateIPSecConnectionStatus(ipsecconnection, ctx)
 			if err != nil {
 				logger.Info("Couldn't create free ip list to change status", err)
 				success = false
 			}
-			err = r.Status().Update(ctx, ipman)
+			err = r.Status().Update(ctx, ipsecconnection)
 			if err != nil {
-				logger.Info("Couldn't update ipman status", err)
+				logger.Info("Couldn't update ipsecconnection status", err)
 				success = false
 			}
 		}
 	}
 
-	isIpman, err := r.isReconcilingKindIpman(ctx, req)
+	isIPSecConnection, err := r.isReconcilingKindIPSecConnection(ctx, req)
 	if err != nil {
 		logger.Error(err, "Error checking kind of reconciled object")
 		return res(rq), err
 	}
 
-	if isIpman {
-		logger.Info("Reconciling ipman")
-		err := r.reconcileIpman(ctx, req)
+	if isIPSecConnection {
+		logger.Info("Reconciling ipsecconnection")
+		err := r.reconcileIPSecConnection(ctx, req)
 		if err != nil {
 			return res(rq, time.Second*10), nil
 		}
@@ -378,7 +378,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 				if val, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && val != "" {
 					err = r.Delete(ctx, &p)
 					if err != nil {
-						logger.Error(err, "Error deleting pod since there are no ipmen", "podname", p.Name)
+						logger.Error(err, "Error deleting pod since there are no ipsecconnections", "podname", p.Name)
 					}
 				}
 
@@ -395,7 +395,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 				if s[0] == cpn[0] && s[1] == cpn[1] && p.Namespace == r.Env.NamespaceName {
 					err = r.Delete(ctx, &p)
 					if err != nil {
-						logger.Error(err, "Error deleting charon pod since there are no ipmen", "podname", p.Name)
+						logger.Error(err, "Error deleting charon pod since there are no ipsecconnections", "podname", p.Name)
 					}
 				}
 
@@ -411,7 +411,7 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 			if ok && !slices.Contains(chlidrenNameList, annotation) {
 				err = r.Delete(ctx, &p)
 				if err != nil {
-					logger.Error(err, "Error deleting pod since there are no ipmen", "podname", p.Name)
+					logger.Error(err, "Error deleting pod since there are no ipsecconnections", "podname", p.Name)
 				}
 			}
 		}
@@ -424,7 +424,7 @@ func hasIpmanAnnotation(o client.Object) bool {
 	return ok
 }
 
-func (r *IpmanReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *IPSecConnectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	var annotationPredicate = predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
 			return hasIpmanAnnotation(e.Object)
@@ -440,7 +440,7 @@ func (r *IpmanReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		},
 	}
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&ipmanv1.Ipman{}).
+		For(&ipmanv1.IPSecConnection{}).
 		Watches(&corev1.Pod{}, &handler.EnqueueRequestForObject{}, builder.WithPredicates(annotationPredicate)).
 		Complete(r)
 }

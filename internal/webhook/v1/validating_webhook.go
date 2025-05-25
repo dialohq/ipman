@@ -56,21 +56,21 @@ func writeResponseDenied(w http.ResponseWriter, in *admissionv1.AdmissionReview,
 	w.Write(rjson)
 }
 
-func validateIpmanDeletion(req *admissionv1.AdmissionRequest, workers []corev1.Pod, xfrm []corev1.Pod) (bool, error) {
-	ipman := &ipmanv1.Ipman{}
-	err := json.Unmarshal(req.OldObject.Raw, ipman)
+func validateIPSecConnectionDeletion(req *admissionv1.AdmissionRequest, workers []corev1.Pod, xfrm []corev1.Pod) (bool, error) {
+	ipsecconnection := &ipmanv1.IPSecConnection{}
+	err := json.Unmarshal(req.OldObject.Raw, ipsecconnection)
 	if err != nil {
-		return false, fmt.Errorf("Couldn't unmarshal ipman: %w", err)
+		return false, fmt.Errorf("Couldn't unmarshal ipsecconnection: %w", err)
 	}
 
 	for _, p := range xfrm {
-		if _, ok := ipman.Spec.Children[p.Annotations["ipman.dialo.ai/childName"]]; ok {
+		if _, ok := ipsecconnection.Spec.Children[p.Annotations["ipman.dialo.ai/childName"]]; ok {
 			if !canDeleteXfrm(&p, workers) {
 				podNames := []string{}
 				for _, pod := range workers {
 					podNames = append(podNames, pod.Name)
 				}
-				return false, fmt.Errorf("Worker pods use xfrm that belongs to this ipman: %v", podNames)
+				return false, fmt.Errorf("Worker pods use xfrm that belongs to this ipsecconnection: %v", podNames)
 			}
 		}
 	}
@@ -78,10 +78,10 @@ func validateIpmanDeletion(req *admissionv1.AdmissionRequest, workers []corev1.P
 	return true, nil
 }
 
-func validateIpmanUnique(ipman ipmanv1.Ipman) (bool, error) {
+func validateIPSecConnectionUnique(ipsecconnection ipmanv1.IPSecConnection) (bool, error) {
 	ips := sets.NewString()
 	ifids := sets.NewInt()
-	for _, c := range ipman.Spec.Children {
+	for _, c := range ipsecconnection.Spec.Children {
 		for _, pool := range c.IpPools {
 			for _, ip := range pool {
 				if ips.Has(ip) {
@@ -98,18 +98,18 @@ func validateIpmanUnique(ipman ipmanv1.Ipman) (bool, error) {
 	return true, nil
 }
 
-func validateIpmanCreation(ipman ipmanv1.Ipman, other []ipmanv1.Ipman, pods []corev1.Pod) (bool, error) {
+func validateIPSecConnectionCreation(ipsecconnection ipmanv1.IPSecConnection, other []ipmanv1.IPSecConnection, pods []corev1.Pod) (bool, error) {
 	for _, obj := range other {
-		if obj.Spec.Name == ipman.Spec.Name {
-			return false, fmt.Errorf("Ipman with that name already exists %s == %s", obj.Spec.Name, ipman.Spec.Name)
+		if obj.Spec.Name == ipsecconnection.Spec.Name {
+			return false, fmt.Errorf("IPSecConnection with that name already exists %s == %s", obj.Spec.Name, ipsecconnection.Spec.Name)
 		}
 	}
 	for _, p := range pods {
-		if p.Annotations[ipmanv1.AnnotationIpmanName] == ipman.Spec.Name {
-			return false, fmt.Errorf("There are existing pods with this ipman annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
+		if p.Annotations[ipmanv1.AnnotationIpmanName] == ipsecconnection.Spec.Name {
+			return false, fmt.Errorf("There are existing pods with this ipsecconnection annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
 		}
 	}
-	return validateIpmanUnique(ipman)
+	return validateIPSecConnectionUnique(ipsecconnection)
 }
 
 func isChildDeleted(new map[string]ipmanv1.Child, old map[string]ipmanv1.Child) ([]ipmanv1.Child, bool) {
@@ -140,7 +140,7 @@ func isChildAdded(new map[string]ipmanv1.Child, old map[string]ipmanv1.Child) ([
 	return added, true
 }
 
-func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod) (bool, error) {
+func validateIPSecConnectionUpdate(new ipmanv1.IPSecConnection, old ipmanv1.IPSecConnection, pods []corev1.Pod) (bool, error) {
 	newChildrenNames := slices.Collect(maps.Keys(new.Spec.Children))
 	oldChildrenNames := slices.Collect(maps.Keys(old.Spec.Children))
 	dependentPods := map[string][]corev1.Pod{}
@@ -248,7 +248,7 @@ func validateIpmanUpdate(new ipmanv1.Ipman, old ipmanv1.Ipman, pods []corev1.Pod
 		}
 	}
 
-	return validateIpmanUnique(new)
+	return validateIPSecConnectionUnique(new)
 }
 
 func getAction(req *admissionv1.AdmissionRequest) any {
@@ -299,41 +299,41 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 	verdict := false
 	switch action.(type) {
 	case creationAction:
-		ipmen := &ipmanv1.IpmanList{}
-		err = wh.Client.List(ctx, ipmen)
+		ipsecconnections := &ipmanv1.IPSecConnectionList{}
+		err = wh.Client.List(ctx, ipsecconnections)
 		if err != nil {
-			err = fmt.Errorf("Couldn't list ipmen: %w", err)
+			err = fmt.Errorf("Couldn't list ipsecconnections: %w", err)
 			writeResponseDenied(w, in, err.Error())
 			return
 		}
-		newIpman := &ipmanv1.Ipman{}
-		if err = json.Unmarshal(in.Request.Object.Raw, newIpman); err != nil {
-			err = fmt.Errorf("Couldn't unmarshal ipman for creation: %w", err)
+		newIPSecConnection := &ipmanv1.IPSecConnection{}
+		if err = json.Unmarshal(in.Request.Object.Raw, newIPSecConnection); err != nil {
+			err = fmt.Errorf("Couldn't unmarshal ipsecconnection for creation: %w", err)
 			writeResponseDenied(w, in, err.Error())
 			return
 		}
-		verdict, err = validateIpmanCreation(*newIpman, ipmen.Items, allPods.Items)
+		verdict, err = validateIPSecConnectionCreation(*newIPSecConnection, ipsecconnections.Items, allPods.Items)
 
 	case deletionAction:
 		xfrmPods := extractXfrmPods(allPods.Items, wh.Env.NamespaceName)
-		verdict, err = validateIpmanDeletion(in.Request, allPods.Items, xfrmPods)
+		verdict, err = validateIPSecConnectionDeletion(in.Request, allPods.Items, xfrmPods)
 
 	case updateAction:
-		old := ipmanv1.Ipman{}
+		old := ipmanv1.IPSecConnection{}
 		err = json.Unmarshal(in.Request.OldObject.Raw, &old)
 		if err != nil {
 			err = fmt.Errorf("Couldn't unmarshal old object: %w", err)
 			writeResponseDenied(w, in, err.Error())
 			return
 		}
-		new := ipmanv1.Ipman{}
+		new := ipmanv1.IPSecConnection{}
 		err = json.Unmarshal(in.Request.Object.Raw, &new)
 		if err != nil {
 			err = fmt.Errorf("Couldn't unmarshal new object: %w", err)
 			writeResponseDenied(w, in, err.Error())
 			return
 		}
-		verdict, err = validateIpmanUpdate(new, old, allPods.Items)
+		verdict, err = validateIPSecConnectionUpdate(new, old, allPods.Items)
 
 	default:
 		verdict = false

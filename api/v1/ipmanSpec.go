@@ -5,7 +5,7 @@ import (
 	"strings"
 )
 
-type IpmanSpec struct {
+type IPSecConnectionSpec struct {
 	Name       string            `json:"name"`
 	RemoteAddr string            `json:"remoteAddr"`
 	LocalAddr  string            `json:"localAddr"`
@@ -19,15 +19,15 @@ type IpmanSpec struct {
 
 type ConnData struct {
 	Secret string
-	Ipman  Ipman
+	IPSecConnection  IPSecConnection
 }
 
-func (v *IpmanSpec) SerializeAllToConf(data []ConnData) string {
+func (v *IPSecConnectionSpec) SerializeAllToConf(data []ConnData) string {
 	conns := ""
 	secrets := ""
 	for _, d := range data {
 		serializedChildren := ""
-		for _, child := range d.Ipman.Spec.Children {
+		for _, child := range d.IPSecConnection.Spec.Children {
 			serializedChildren += child.SerializeToConf()
 		}
 		conns += fmt.Sprintf(`%s {
@@ -45,14 +45,14 @@ func (v *IpmanSpec) SerializeAllToConf(data []ConnData) string {
 			%s
 		}
 `,
-			d.Ipman.Spec.Name,
-			d.Ipman.Spec.RemoteAddr,
-			d.Ipman.Spec.LocalAddr,
-			d.Ipman.Spec.LocalId,
-			d.Ipman.Spec.RemoteId,
+			d.IPSecConnection.Spec.Name,
+			d.IPSecConnection.Spec.RemoteAddr,
+			d.IPSecConnection.Spec.LocalAddr,
+			d.IPSecConnection.Spec.LocalId,
+			d.IPSecConnection.Spec.RemoteId,
 			serializedChildren,
 		)
-		for k, v := range d.Ipman.Spec.Extra {
+		for k, v := range d.IPSecConnection.Spec.Extra {
 			conns += fmt.Sprintf("%s = %s\n", k, v)
 		}
 		conns += "}\n"
@@ -64,10 +64,10 @@ func (v *IpmanSpec) SerializeAllToConf(data []ConnData) string {
 		remote-id = %s
 	}
 `,
-			d.Ipman.Spec.SecretRef.Key,
+			d.IPSecConnection.Spec.SecretRef.Key,
 			strings.Trim(d.Secret, " \n\t"),
-			d.Ipman.Spec.LocalId,
-			d.Ipman.Spec.RemoteId)
+			d.IPSecConnection.Spec.LocalId,
+			d.IPSecConnection.Spec.RemoteId)
 	}
 
 	return fmt.Sprintf(`
@@ -79,7 +79,7 @@ secrets {
 }`, conns, secrets)
 }
 
-func (v *IpmanSpec) SerializeToConf(secret string) string {
+func (v *IPSecConnectionSpec) SerializeToConf(secret string) string {
 	serializedChildren := ""
 	for _, child := range v.Children {
 		serializedChildren += child.SerializeToConf()
@@ -124,7 +124,7 @@ secrets {
 	return conf
 }
 
-func (v IpmanSpec) DeepEqual(other IpmanSpec) bool {
+func (v IPSecConnectionSpec) DeepEqual(other IPSecConnectionSpec) bool {
 	if v.Name != other.Name ||
 		v.RemoteAddr != other.RemoteAddr ||
 		v.LocalId != other.LocalId ||

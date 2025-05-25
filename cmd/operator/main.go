@@ -49,7 +49,7 @@ func main() {
 	}
 
 	logger.Info("Creating controller")
-	if err = (&cont.IpmanReconciler{
+	if err = (&cont.IPSecConnectionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		Env:    e,
