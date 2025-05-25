@@ -1,19 +1,19 @@
 apiVersion: cert-manager.io/v1
 kind: Certificate
 metadata:
-  name: {{ .Values.CertificateName }} 
-  namespace: {{ .Values.systemNamespace }}
+  name: {{ .Values.webhook.certificate.name }} 
+  namespace: {{ .Values.global.namespace }}
 spec:
   isCA: true
-  commonName: {{ .Values.WebhookServiceName }}.{{ .Values.systemNamespace }}.svc
+  commonName: {{ .Values.webhook.serviceName }}.{{ .Values.global.namespace }}.svc
   dnsNames:
-  - {{ .Values.WebhookServiceName }}.{{ .Values.systemNamespace }}.svc
-  - {{ .Values.WebhookServiceName }}.{{ .Values.systemNamespace }}.svc.cluster.local
-  secretName: {{ .Values.CertificateSecretName }}
+  - {{ .Values.webhook.serviceName }}.{{ .Values.global.namespace }}.svc
+  - {{ .Values.webhook.serviceName }}.{{ .Values.global.namespace }}.svc.cluster.local
+  secretName: {{ .Values.webhook.certificate.secretName }}
   privateKey:
     algorithm: ECDSA
     size: 256
   issuerRef:
-    name: {{ .Values.IssuerName }}
+    name: {{ .Values.webhook.certificate.issuerName }}
     kind: Issuer
     group: cert-manager.io

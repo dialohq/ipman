@@ -1,8 +1,8 @@
 apiVersion: cert-manager.io/v1
 kind: Issuer
 metadata:
-  name: {{.Values.IssuerName }}
-  namespace: {{ .Values.systemNamespace }}
+  name: {{.Values.webhook.certificate.issuerName }}
+  namespace: {{ .Values.global.namespace }}
 spec:
   selfSigned: {}
 

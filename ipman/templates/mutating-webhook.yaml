@@ -1,20 +1,20 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{.Values.MutatingWebhookName}}
+  name: {{.Values.webhook.mutatingWebhookName}}
   annotations:
-    cert-manager.io/inject-ca-from: {{.Values.systemNamespace}}/{{.Values.CertificateName}}
+    cert-manager.io/inject-ca-from: {{.Values.global.namespace}}/{{.Values.webhook.certificate.name}}
 
 webhooks:
-- name: webhook.{{ .Values.Organization}}
+- name: webhook.ipman.dialo.ai
   timeoutSeconds: 30
   failurePolicy: Fail
   admissionReviewVersions: ["v1"]
   sideEffects: NoneOnDryRun
   clientConfig:
     service:
-      namespace: {{.Values.systemNamespace}}
-      name: {{.Values.WebhookServiceName}}
+      namespace: {{.Values.global.namespace}}
+      name: {{.Values.webhook.serviceName}}
       path: /mutating
       port:  443
   # this is here to prevent a deadlock
@@ -26,7 +26,7 @@ webhooks:
       - key: kubernetes.io/metadata.name
         operator: NotIn
         values:
-          - {{.Values.systemNamespace}}
+          - {{.Values.global.namespace}}
           
   objectSelector: {}
   rules:

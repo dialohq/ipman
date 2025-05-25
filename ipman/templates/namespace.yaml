@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ .Values.systemNamespace }}
+  name: {{ .Values.global.namespace }}
   # TODO: make it an exemption in the admission controller
   # or something. NET_ADMIN capabilites get blocked even in baseline ;(
   # https://kubernetes.io/docs/tasks/configure-pod-container/enforce-standards-admission-controller/#configure-the-admission-controller

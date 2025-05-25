@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ipman-restctl-service
+  namespace: {{ .Values.global.namespace }}
+spec:
+  selector: 
+    ipserviced: "true"
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
