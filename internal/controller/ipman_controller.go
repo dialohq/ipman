@@ -27,8 +27,7 @@ import (
 
 type Envs struct {
 	NamespaceName     string
-	ProxySocketPath   string
-	CharonSocketPath  string
+	HostSocketsPath   string
 	XfrminionImage    string
 	VxlandlordImage   string
 	RestctlImage      string
@@ -383,8 +382,16 @@ func (r *IpmanReconciler) Reconcile(ctx context.Context, req reconcile.Request) 
 					}
 				}
 
-				cpn := strings.Split(ipmanv1.CharonPodName, "-")
 				s := strings.Split(p.Name, "-")
+				rpn := strings.Split(ipmanv1.RestctlPodName, "-")
+				if s[0] == rpn[0] && s[1] == rpn[1] && p.Namespace == r.Env.NamespaceName {
+					err = r.Delete(ctx, &p)
+					if err != nil {
+						logger.Error(err, "Error deleting restctl pod since there are no ipmen", "podname", p.Name)
+					}
+				}
+
+				cpn := strings.Split(ipmanv1.CharonPodName, "-")
 				if s[0] == cpn[0] && s[1] == cpn[1] && p.Namespace == r.Env.NamespaceName {
 					err = r.Delete(ctx, &p)
 					if err != nil {

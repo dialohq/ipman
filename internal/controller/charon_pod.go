@@ -80,8 +80,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 		return nil, nil, err
 	}
 
-	// Ensure restctl pod separately
-	_, err = r.ensureRestctlPod(ctx, ipman, serializedConfig)
+	_, err = r.ensureRestctlPod(ctx, ipman)
 	if err != nil {
 		logger.Error(err, "Couldn't ensure restctl pod")
 		return nil, nil, err
@@ -132,7 +131,7 @@ func (r *IpmanReconciler) createCharonPod(serializedConfig string, ipman *ipmanv
 				{Name: ipmanv1.CharonSocketVolumeName},
 				{Name: ipmanv1.CharonConfVolumeName},
 				{Name: ipmanv1.CharonConnVolumeName},
-				createCharonSocketVolume(),
+				createCharonSocketVolume(r.Env.HostSocketsPath),
 			},
 			HostNetwork: true,
 			HostPID:     true,
@@ -170,19 +169,6 @@ func (r *IpmanReconciler) ensureCharonProxy(nodeName string) (*corev1.Pod, error
 	return proxyPod, nil
 }
 
-func createCharonProxySocketVolume(path string) corev1.Volume {
-	HostPathType := corev1.HostPathDirectoryOrCreate
-	return corev1.Volume{
-		Name: ipmanv1.CharonApiSocketVolumeName,
-		VolumeSource: corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{
-				Path: path,
-				Type: &HostPathType,
-			},
-		},
-	}
-}
-
 func (r *IpmanReconciler) proxyPodNsn(name string) types.NamespacedName {
 	return types.NamespacedName{
 		Name:      name,
@@ -202,7 +188,7 @@ func (r *IpmanReconciler) createCharonProxyPod(proxyPodName, nodeName string) *c
 				"kubernetes.io/hostname": nodeName,
 			},
 			Volumes: []corev1.Volume{
-				createRestctlSocketVolume(),
+				createCharonSocketVolume(r.Env.HostSocketsPath),
 			},
 			Containers: []corev1.Container{
 				{
@@ -211,7 +197,7 @@ func (r *IpmanReconciler) createCharonProxyPod(proxyPodName, nodeName string) *c
 					Image:           ipmanv1.CharonApiProxyContainerImage + ":" + ipmanv1.CharonApiProxyContainerImageTag,
 					VolumeMounts: []corev1.VolumeMount{
 						{
-							Name:      "restctl-host-socket",
+							Name:      "charon-host-socket",
 							MountPath: ipmanv1.CharonApiSocketVolumePath,
 						},
 					},
@@ -243,10 +229,15 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 		Name:            ipmanv1.CharonRestctlContainerName,
 		Image:           r.Env.RestctlImage,
 		VolumeMounts: []corev1.VolumeMount{
-			{Name: "restctl-host-socket", MountPath: ipmanv1.CharonApiSocketVolumePath},
 			{Name: "charon-host-socket", MountPath: ipmanv1.CharonSocketVolumeMountPath},
 			{Name: ipmanv1.CharonConfVolumeName, MountPath: ipmanv1.CharonConfVolumeMountPath},
 			{Name: ipmanv1.CharonConnVolumeName, MountPath: ipmanv1.CharonConnVolumeMountPath},
+		},
+		Env: []corev1.EnvVar{
+			{
+				Name:  "HOST_SOCKETS_PATH",
+				Value: ipmanv1.CharonSocketVolumeMountPath,
+			},
 		},
 		SecurityContext: r.createNetAdminSecurityContext(),
 	}
@@ -269,7 +260,7 @@ func (r *IpmanReconciler) createConfInitContainer(serializedConfig string) corev
 	}
 }
 
-func (r *IpmanReconciler) ensureRestctlPod(ctx context.Context, ipman *ipmanv1.Ipman, serializedConfig string) (*corev1.Pod, error) {
+func (r *IpmanReconciler) ensureRestctlPod(ctx context.Context, ipman *ipmanv1.Ipman) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	restctlPod := &corev1.Pod{}
@@ -315,7 +306,7 @@ func (r *IpmanReconciler) restctlPodNsn(nodeName string) types.NamespacedName {
 func (r *IpmanReconciler) createRestctlPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "restctl-pod-" + ipman.Spec.NodeName,
+			Name:      strings.Join([]string{ipmanv1.RestctlPodName, ipman.Spec.NodeName}, "-"),
 			Namespace: r.Env.NamespaceName,
 		},
 		Spec: corev1.PodSpec{
@@ -328,8 +319,7 @@ func (r *IpmanReconciler) createRestctlPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 				{Name: ipmanv1.CharonSocketVolumeName},
 				{Name: ipmanv1.CharonConfVolumeName},
 				{Name: ipmanv1.CharonConnVolumeName},
-				createCharonSocketVolume(),
-				createRestctlSocketVolume(),
+				createCharonSocketVolume(r.Env.HostSocketsPath),
 			},
 			HostNetwork: true,
 			HostPID:     true,
@@ -340,13 +330,13 @@ func (r *IpmanReconciler) createRestctlPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 	}
 }
 
-func createCharonSocketVolume() corev1.Volume {
+func createCharonSocketVolume(hostPath string) corev1.Volume {
 	HostPathType := corev1.HostPathDirectoryOrCreate
 	return corev1.Volume{
 		Name: "charon-host-socket",
 		VolumeSource: corev1.VolumeSource{
 			HostPath: &corev1.HostPathVolumeSource{
-				Path: "/var/run/charon",
+				Path: hostPath,
 				Type: &HostPathType,
 			},
 		},
