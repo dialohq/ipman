@@ -33,4 +33,4 @@ webhooks:
   - operations: ["CREATE", "DELETE", "UPDATE"]
     apiGroups: ["ipman.dialo.ai"]
     apiVersions: ["v1"]
-    resources: ["ipmen"]
+    resources: ["ipsecconnections"]

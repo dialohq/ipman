@@ -107,80 +107,80 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	}
 
 	// prevent race conditions for IP address
-	// from ipman status with leases
+	// from ipsecconnection status with leases
 	locker.Lock()
-	ipman := &ipmanv1.Ipman{}
+	ipsecconnection := &ipmanv1.IPSecConnection{}
 	nsn := types.NamespacedName{
 		Namespace: "",
 		Name:      ipmanName,
 	}
-	err = wh.Client.Get(ctx, nsn, ipman)
+	err = wh.Client.Get(ctx, nsn, ipsecconnection)
 	if err != nil {
-		writeResponseDenied(w, in, "Couldn't fetch ipman")
+		writeResponseDenied(w, in, "Couldn't fetch ipsecconnection")
 		return
 	}
 
-	var ipmanChild *ipmanv1.Child
-	for _, c := range ipman.Spec.Children {
+	var ipsecconnectionChild *ipmanv1.Child
+	for _, c := range ipsecconnection.Spec.Children {
 		if c.Name == childName {
-			ipmanChild = &c
+			ipsecconnectionChild = &c
 			break
 		}
 	}
 
-	if ipmanChild == nil {
+	if ipsecconnectionChild == nil {
 		writeResponseDenied(w, in, "Couldn't find a matching child")
 		return
 	}
 
-	if len(ipman.Status.FreeIPs[ipmanChild.Name][poolName]) == 0 {
-		logger.Info("There are no free IP addresses for requested child. Denying request for pod.\n", "child", ipmanChild.Name, "status", ipman.Status)
+	if len(ipsecconnection.Status.FreeIPs[ipsecconnectionChild.Name][poolName]) == 0 {
+		logger.Info("There are no free IP addresses for requested child. Denying request for pod.\n", "child", ipsecconnectionChild.Name, "status", ipsecconnection.Status)
 		writeResponseDenied(w, in)
 		return
 	}
 
-	pool, ok := ipman.Status.FreeIPs[ipmanChild.Name][poolName]
+	pool, ok := ipsecconnection.Status.FreeIPs[ipsecconnectionChild.Name][poolName]
 	if !ok {
-		logger.Error(fmt.Errorf("Error, couldn't find pool"), "Pool not found in ipman", "annotations", pod.Annotations["ipman.dialo.ai/poolName"], "child", ipmanChild.Name, "ipman", ipman.Name)
+		logger.Error(fmt.Errorf("Error, couldn't find pool"), "Pool not found in ipsecconnection", "annotations", pod.Annotations["ipman.dialo.ai/poolName"], "child", ipsecconnectionChild.Name, "ipsecconnection", ipsecconnection.Name)
 		writeResponseDenied(w, in)
 		return
 	}
 
-	if ipman.Status.CharonProxyIP == "" {
+	if ipsecconnection.Status.CharonProxyIP == "" {
 		writeResponseDenied(w, in, "Charon proxy is not yet ready")
 	}
 
-	_, ok = ipman.Status.XfrmGatewayIPs[ipmanChild.Name]
+	_, ok = ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name]
 	if !ok {
 		writeResponseDenied(w, in, "XfrmPod for that child is not ready yet")
 		return
 	}
 
-	remoteJson, _ := json.Marshal(ipmanChild.RemoteIps)
-	localJson, _ := json.Marshal(ipmanChild.LocalIps)
+	remoteJson, _ := json.Marshal(ipsecconnectionChild.RemoteIps)
+	localJson, _ := json.Marshal(ipsecconnectionChild.LocalIps)
 	annotations := map[string]string{
 		ipmanv1.AnnotationVxlanIp:          pool[0],
-		ipmanv1.AnnotationXfrmIp:           ipmanChild.XfrmIP,
-		ipmanv1.AnnotationIntefaceId:       strconv.FormatInt(int64(ipmanChild.XfrmIfId), 10),
+		ipmanv1.AnnotationXfrmIp:           ipsecconnectionChild.XfrmIP,
+		ipmanv1.AnnotationIntefaceId:       strconv.FormatInt(int64(ipsecconnectionChild.XfrmIfId), 10),
 		ipmanv1.AnnotationRemoteIps:        string(remoteJson),
 		ipmanv1.AnnotationLocalIps:         string(localJson),
-		ipmanv1.AnnotationXfrmUnderlyingIp: ipman.Status.XfrmGatewayIPs[ipmanChild.Name],
+		ipmanv1.AnnotationXfrmUnderlyingIp: ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name],
 	}
 	ip := pool[0]
-	if val, ok := ipman.Status.XfrmGatewayIPs[ipmanChild.Name]; !ok || val == "" {
+	if val, ok := ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name]; !ok || val == "" {
 		writeResponseDenied(w, in, "XfrmGateway not yet assigned an ip")
 		return
 	}
-	patch := patch(&pod, ip, ipman.Status.XfrmGatewayIPs[ipmanChild.Name], annotations, *ipmanChild, wh.Env.VxlandlordImage)
-	ipman.Status.FreeIPs[ipmanChild.Name][poolName] = slices.Delete(ipman.Status.FreeIPs[ipmanChild.Name][poolName], 0, 1)
-	if ipman.Status.PendingIPs == nil {
-		ipman.Status.PendingIPs = map[string]string{}
+	patch := patch(&pod, ip, ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name], annotations, *ipsecconnectionChild, wh.Env.VxlandlordImage)
+	ipsecconnection.Status.FreeIPs[ipsecconnectionChild.Name][poolName] = slices.Delete(ipsecconnection.Status.FreeIPs[ipsecconnectionChild.Name][poolName], 0, 1)
+	if ipsecconnection.Status.PendingIPs == nil {
+		ipsecconnection.Status.PendingIPs = map[string]string{}
 	}
-	ipman.Status.PendingIPs[ip] = time.Now().Format(time.Layout)
+	ipsecconnection.Status.PendingIPs[ip] = time.Now().Format(time.Layout)
 	if !isDryRun {
-		err = wh.Client.Status().Update(ctx, ipman)
+		err = wh.Client.Status().Update(ctx, ipsecconnection)
 		if err != nil {
-			logger.Error(err, "Couldn't update status of ipman in webhook")
+			logger.Error(err, "Couldn't update status of ipsecconnection in webhook")
 			locker.Unlock()
 			writeResponseDenied(w, in)
 			return

@@ -20,10 +20,10 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func (r *IpmanReconciler) xfrmPodNsn(childName, ipmanName string) types.NamespacedName {
+func (r *IPSecConnectionReconciler) xfrmPodNsn(childName, ipsecconnectionName string) types.NamespacedName {
 	ns := r.Env.NamespaceName
 	podNameEnv := ipmanv1.XfrmPodName
-	podName := strings.Join([]string{podNameEnv, childName, ipmanName}, "-")
+	podName := strings.Join([]string{podNameEnv, childName, ipsecconnectionName}, "-")
 
 	return types.NamespacedName{
 		Namespace: ns,
@@ -31,7 +31,7 @@ func (r *IpmanReconciler) xfrmPodNsn(childName, ipmanName string) types.Namespac
 	}
 }
 
-func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName, ipmanName string) (*corev1.Pod, error) {
+func (r *IPSecConnectionReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName, ipsecconnectionName string) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	xfrmPod := &corev1.Pod{}
@@ -40,7 +40,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 	xfrmUrl := ""
 	if apierrors.IsNotFound(err) {
 
-		xfrmPod = r.createXfrmPod(c, nodeName, connName, ipmanName)
+		xfrmPod = r.createXfrmPod(c, nodeName, connName, ipsecconnectionName)
 		if err := r.Create(ctx, xfrmPod); err != nil {
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
@@ -131,7 +131,7 @@ func (r *IpmanReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, n
 
 }
 
-func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connName string, ipmanName string) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connName string, ipsecconnectionName string) *corev1.Pod {
 	remoteIpsJSON, _ := json.Marshal(c.RemoteIps)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -141,7 +141,7 @@ func (r *IpmanReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connN
 				ipmanv1.XfrmPodLabelKey: connName,
 			},
 			Annotations: map[string]string{
-				ipmanv1.AnnotationIpmanName:  ipmanName,
+				ipmanv1.AnnotationIpmanName:  ipsecconnectionName,
 				ipmanv1.AnnotationChildName:  c.Name,
 				ipmanv1.AnnotationVxlanIp:    c.VxlanIP,
 				ipmanv1.AnnotationXfrmIp:     c.XfrmIP,
