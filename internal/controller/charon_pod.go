@@ -55,7 +55,7 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 	if apierrors.IsNotFound(err) {
 		// wait for service to pick up webhooks
 		for {
-			charonPod = r.createCharonPod(serializedConfig, ipman)
+			charonPod = r.createCharonPod(ipman)
 			if err := r.Create(ctx, charonPod); err != nil {
 				if apierrors.IsInternalError(err) {
 					logger.Info("Couldn't create charon pod", "error", err)
@@ -93,27 +93,38 @@ func (r *IpmanReconciler) ensureCharonPod(ctx context.Context, ipman *ipmanv1.Ip
 	}
 	proxyPod, err = waitForPodReady(proxyPod, r.proxyPodNsn(proxyPod.Name), r.Get)
 
-	url := "http://" + proxyPod.Status.PodIP + "/reload"
+	err = r.sendConfigToCharonPod(ctx, proxyPod, serializedConfig)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return charonPod, proxyPod, nil
+}
+
+func (r *IpmanReconciler) sendConfigToCharonPod(ctx context.Context, restctlPod *corev1.Pod, serializedConfig string) error {
+	logger := log.FromContext(ctx)
+
+	url := "http://" + restctlPod.Status.PodIP + "/reload"
 	data := &comms.ReloadData{
 		SerializedConfig: serializedConfig,
 	}
 
 	resp, err := comms.SendPost(url, data)
 	for i := 0; err != nil && i < 3; i++ {
-		logger.Error(err, "Couldn't send request to reload charon pod", "charon-pod", charonPod)
+		logger.Error(err, "Couldn't send request to reload charon pod", "restctl-pod", restctlPod)
 		time.Sleep(1 * time.Second)
 		resp, err = comms.SendPost(url, data)
 	}
 
 	if resp.StatusCode != 200 {
 		logger.Error(err, "error getting", "resp", resp)
-		return nil, nil, fmt.Errorf("Error reloading charon pod (%s)", charonPod.Name)
+		return fmt.Errorf("Error sending config to charon pod via restctl (%s)", restctlPod.Name)
 	}
 
-	return charonPod, proxyPod, nil
+	return nil
 }
 
-func (r *IpmanReconciler) createCharonPod(serializedConfig string, ipman *ipmanv1.Ipman) *corev1.Pod {
+func (r *IpmanReconciler) createCharonPod(ipman *ipmanv1.Ipman) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      ipmanv1.CharonPodName + "-" + ipman.Spec.NodeName,
@@ -137,9 +148,6 @@ func (r *IpmanReconciler) createCharonPod(serializedConfig string, ipman *ipmanv
 			HostPID:     true,
 			Containers: []corev1.Container{
 				r.createCharonDaemonContainer(),
-			},
-			InitContainers: []corev1.Container{
-				r.createConfInitContainer(serializedConfig),
 			},
 		},
 	}
@@ -243,23 +251,6 @@ func (r *IpmanReconciler) createRestCtlContainer() corev1.Container {
 	}
 }
 
-func (r *IpmanReconciler) createConfInitContainer(serializedConfig string) corev1.Container {
-	return corev1.Container{
-		ImagePullPolicy: corev1.PullAlways,
-		Name:            ipmanv1.CharonCreateConfContainerName,
-		Image:           ipmanv1.CharonCreateConfImage + ":" + ipmanv1.CharonCreateConfImageTag,
-		Command: []string{
-			"sh", "-c",
-			fmt.Sprintf("echo '%s' > %sswanctl.conf && chmod 666 %sswanctl.conf && touch /etc/strongswan.conf",
-				serializedConfig, ipmanv1.CharonConfVolumeMountPath, ipmanv1.CharonConfVolumeMountPath),
-		},
-		VolumeMounts: []corev1.VolumeMount{
-			{Name: ipmanv1.CharonConfVolumeName, MountPath: ipmanv1.CharonConfVolumeMountPath},
-		},
-		SecurityContext: r.createDefaultSecurityContext(),
-	}
-}
-
 func (r *IpmanReconciler) ensureRestctlPod(ctx context.Context, ipman *ipmanv1.Ipman) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
@@ -337,19 +328,6 @@ func createCharonSocketVolume(hostPath string) corev1.Volume {
 		VolumeSource: corev1.VolumeSource{
 			HostPath: &corev1.HostPathVolumeSource{
 				Path: hostPath,
-				Type: &HostPathType,
-			},
-		},
-	}
-}
-
-func createRestctlSocketVolume() corev1.Volume {
-	HostPathType := corev1.HostPathDirectoryOrCreate
-	return corev1.Volume{
-		Name: "restctl-host-socket",
-		VolumeSource: corev1.VolumeSource{
-			HostPath: &corev1.HostPathVolumeSource{
-				Path: "/var/run/restctl",
 				Type: &HostPathType,
 			},
 		},
