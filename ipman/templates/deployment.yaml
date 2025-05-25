@@ -2,11 +2,11 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "ipman.fullname" . }}
-  namespace: {{ .Values.systemNamespace }}
+  namespace: {{ .Values.global.namespace }}
   labels:
     {{- include "ipman.labels" . | nindent 4 }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ .Values.controller.replicaCount }}
   selector:
     matchLabels:
       {{- include "ipman.selectorLabels" . | nindent 6 }}
@@ -23,39 +23,39 @@ spec:
         {{- end }}
     spec:
       serviceAccountName: {{ include "ipman.serviceAccountName" . }}
-      {{- with .Values.podSecurityContext }}
+      {{- with .Values.controller.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
-          {{- with .Values.securityContext }}
+          {{- with .Values.controller.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: {{ .Values.controller.image }}
+          imagePullPolicy: {{ .Values.controller.pullPolicy }}
           env:
             - name: NAMESPACE_NAME
-              value: {{ .Values.systemNamespace }}
+              value: {{ .Values.global.namespace }}
             - name: XFRMINION_IMAGE
-              value: {{ .Values.XfrminionImage }}
+              value: {{ .Values.xfrminion.image }}
             - name: VXLANDLORD_IMAGE
-              value: {{ .Values.VxlandlordImage }}
+              value: {{ .Values.vxlandlord.image }}
             - name: RESTCTL_IMAGE
-              value: {{ .Values.RestctlImage }}
+              value: {{ .Values.restctl.image }}
             - name: CHARONDAEMON_IMAGE
-              value: {{ .Values.CharondaemonImage}}
-            - name: CADDY_IMAGE
-              value: {{ .Values.CaddyImage }}
+              value: {{ .Values.charon.image }}
+            - name: PROXY_SOCKET_PATH
+              value: {{ .Values.global.socketPath }}
             - name: HOST_SOCKETS_PATH
-              value: {{ .Values.CharonSocketsPath }}
+              value: {{ .Values.global.socketPath }}
 
           volumeMounts:
-          - name: {{ .Values.volumeMountName }}
-            mountPath: /etc/webhook/certs
-            readOnly: true
+          - name: {{ .Values.webhook.volumes.name }}
+            mountPath: {{ .Values.webhook.volumes.mountPath }}
+            readOnly: {{ .Values.webhook.volumes.readOnly }}
       volumes:
-      - name: {{ .Values.volumeMountName }}
+      - name: {{ .Values.webhook.volumes.name }}
         secret:
-          secretName: {{ .Values.CertificateSecretName}}
+          secretName: {{ .Values.webhook.certificate.secretName }}
