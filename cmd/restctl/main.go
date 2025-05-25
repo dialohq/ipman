@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/exec"
@@ -299,21 +300,26 @@ func main() {
 	mux.HandleFunc("/xfrm", createXfrm)
 	mux.HandleFunc("/vxlan", createVxlan)
 
-	// Start HTTP server for external access
-	httpServer := http.Server{
-		Addr:    ":80",
+	server := http.Server{
 		Handler: mux,
+	}
+
+	listener, err := net.Listen("unix", API_SOCKET_PATH)
+	if err != nil {
+		logger.Error("Error listening on socket", "msg", err, "socket-path", API_SOCKET_PATH)
+		os.Exit(1)
 	}
 
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-c
+		os.Remove(API_SOCKET_PATH)
 		os.Exit(1)
 	}()
 
-	logger.Info("Listening on HTTP", "port", "80")
-	if err := httpServer.ListenAndServe(); err != nil {
-		logger.Error("Couldn't start HTTP server", "msg", err)
+	logger.Info("Listening on socket", "socket", API_SOCKET_PATH)
+	if err := server.Serve(listener); err != nil {
+		logger.Error("Couldn't start server on listener", "msg", err)
 	}
 }
