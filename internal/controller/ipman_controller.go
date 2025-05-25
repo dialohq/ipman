@@ -203,7 +203,7 @@ func (r *IPSecConnectionReconciler) reconcileIPSecConnection(ctx context.Context
 	}
 
 	for childName, c := range ipsecconnection.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ctx, &c, ipsecconnection.Spec.NodeName, ipsecconnection.Status.CharonProxyIP, ipsecconnection.Spec.Name, ipsecconnection.Name)
+		xfrmPod, err := r.ensureXfrmPod(ipsecconnection, ctx, &c)
 		if err != nil {
 			logger.Error(err, "error creating xfrmpod")
 			return err

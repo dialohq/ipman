@@ -2,14 +2,28 @@ package controller
 
 import (
 	"context"
+	ipmanv1 "dialo.ai/ipman/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+
 	"log/slog"
 	"os"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"time"
 )
+
+func createOwnerReference(ipsecconnection *ipmanv1.IPSecConnection) metav1.OwnerReference {
+	cont := true
+	return metav1.OwnerReference{
+		APIVersion: ipsecconnection.APIVersion,
+		Kind:       ipsecconnection.Kind,
+		Name:       ipsecconnection.Name,
+		UID:        ipsecconnection.UID,
+		Controller: &cont,
+	}
+}
 
 // rke2 requires seccomp profile set to runtime default or localhost
 func (r *IPSecConnectionReconciler) createDefaultSecurityContext() *corev1.SecurityContext {

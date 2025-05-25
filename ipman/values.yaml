@@ -7,7 +7,7 @@ global:
 # Controller (operator) configuration
 controller:
   replicaCount: 1
-  image: "plan9better/operator:0.0.5"
+  image: "plan9better/operator:0.0.6"
   pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true
@@ -27,16 +27,16 @@ caddy:
   image: "caddy:2.10.0-alpine"
 # Restctl service configuration
 restctl:
-  image: "plan9better/restctl:0.0.5"
+  image: "plan9better/restctl:0.0.6"
 # VxlanLord configuration
 vxlandlord:
-  image: "plan9better/vxlandlord:0.0.5"
+  image: "plan9better/vxlandlord:0.0.6"
 # XfrmMinion configuration
 xfrminion:
-  image: "plan9better/xfrminion:0.0.5"
+  image: "plan9better/xfrminion:0.0.6"
 # Charon daemon configuration
 charon:
-  image: "plan9better/strongswan-charon:0.0.5"
+  image: "plan9better/strongswan-charon:0.0.6"
 # Webhook configuration
 webhook:
   serviceName: "ipman-webhook-service"

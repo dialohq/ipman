@@ -31,22 +31,22 @@ func (r *IPSecConnectionReconciler) xfrmPodNsn(childName, ipsecconnectionName st
 	}
 }
 
-func (r *IPSecConnectionReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv1.Child, nodeName, charonPodIp, connName, ipsecconnectionName string) (*corev1.Pod, error) {
+func (r *IPSecConnectionReconciler) ensureXfrmPod(ipsecconnection *ipmanv1.IPSecConnection, ctx context.Context, c *ipmanv1.Child) (*corev1.Pod, error) {
 	logger := log.FromContext(ctx)
 
 	xfrmPod := &corev1.Pod{}
 
-	err := r.Get(ctx, r.xfrmPodNsn(c.Name, connName), xfrmPod)
+	err := r.Get(ctx, r.xfrmPodNsn(c.Name, ipsecconnection.Name), xfrmPod)
 	xfrmUrl := ""
 	if apierrors.IsNotFound(err) {
 
-		xfrmPod = r.createXfrmPod(c, nodeName, connName, ipsecconnectionName)
+		xfrmPod = r.createXfrmPod(c, ipsecconnection)
 		if err := r.Create(ctx, xfrmPod); err != nil {
 			logger.Error(err, "Failed to create xfrm pod")
 			return nil, err
 		}
 
-		xfrmPod, err = waitForPodReady(xfrmPod, r.xfrmPodNsn(c.Name, connName), r.Get)
+		xfrmPod, err = waitForPodReady(xfrmPod, r.xfrmPodNsn(c.Name, ipsecconnection.Spec.Name), r.Get)
 		if err != nil {
 			logger.Error(err, "Error waiting for xfrm pod to be ready", "pod", xfrmPod.Name)
 			return nil, err
@@ -82,7 +82,7 @@ func (r *IPSecConnectionReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv
 			PID:      prd.Pid,
 		}
 
-		charonUrl := fmt.Sprintf("http://%s", charonPodIp)
+		charonUrl := fmt.Sprintf("http://%s", ipsecconnection.Status.CharonProxyIP)
 		resp, err = comms.SendPost(charonUrl+"/xfrm", xfrmRequest)
 
 		if err != nil {
@@ -131,17 +131,18 @@ func (r *IPSecConnectionReconciler) ensureXfrmPod(ctx context.Context, c *ipmanv
 
 }
 
-func (r *IPSecConnectionReconciler) createXfrmPod(c *ipmanv1.Child, nodeName string, connName string, ipsecconnectionName string) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createXfrmPod(c *ipmanv1.Child, ipsecconnection *ipmanv1.IPSecConnection) *corev1.Pod {
 	remoteIpsJSON, _ := json.Marshal(c.RemoteIps)
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, connName}, "-"),
+			Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, ipsecconnection.Spec.Name}, "-"),
 			Namespace: r.Env.NamespaceName,
 			Labels: map[string]string{
-				ipmanv1.XfrmPodLabelKey: connName,
+				ipmanv1.XfrmPodLabelKey: ipsecconnection.Spec.Name,
 			},
+			OwnerReferences: []metav1.OwnerReference{createOwnerReference(ipsecconnection)},
 			Annotations: map[string]string{
-				ipmanv1.AnnotationIpmanName:  ipsecconnectionName,
+				ipmanv1.AnnotationIpmanName:  ipsecconnection.Spec.Name,
 				ipmanv1.AnnotationChildName:  c.Name,
 				ipmanv1.AnnotationVxlanIp:    c.VxlanIP,
 				ipmanv1.AnnotationXfrmIp:     c.XfrmIP,
@@ -151,7 +152,7 @@ func (r *IPSecConnectionReconciler) createXfrmPod(c *ipmanv1.Child, nodeName str
 		},
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
-				"kubernetes.io/hostname": nodeName,
+				"kubernetes.io/hostname": ipsecconnection.Spec.NodeName,
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
 			HostPID:       true,

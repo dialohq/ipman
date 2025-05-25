@@ -72,14 +72,14 @@ clean:
 		-f namespace.yaml || true
 
 vxlandlord:
-	docker build -t plan9better/vxlandlord:0.0.5 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
-	docker push plan9better/vxlandlord:0.0.5 
+	docker build -t plan9better/vxlandlord:0.0.6 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
+	docker push plan9better/vxlandlord:0.0.6 
 xfrminion:
-	docker build -t plan9better/xfrminion:0.0.5 --platform linux/amd64 --file ./xfrminion.Dockerfile .
-	docker push plan9better/xfrminion:0.0.5 
+	docker build -t plan9better/xfrminion:0.0.6 --platform linux/amd64 --file ./xfrminion.Dockerfile .
+	docker push plan9better/xfrminion:0.0.6 
 restctl:
-	docker build -t plan9better/restctl:0.0.5 --platform linux/amd64 --file ./restctl.Dockerfile .
-	docker push plan9better/restctl:0.0.5 
+	docker build -t plan9better/restctl:0.0.6 --platform linux/amd64 --file ./restctl.Dockerfile .
+	docker push plan9better/restctl:0.0.6 
 operator:
-	docker build -t plan9better/operator:0.0.5 --platform linux/amd64 --file ./operator.Dockerfile .
-	docker push plan9better/operator:0.0.5 
+	docker build -t plan9better/operator:0.0.6 --platform linux/amd64 --file ./operator.Dockerfile .
+	docker push plan9better/operator:0.0.6 

@@ -86,7 +86,7 @@ func (r *IPSecConnectionReconciler) ensureCharonPod(ctx context.Context, ipsecco
 		return nil, nil, err
 	}
 
-	proxyPod, err := r.ensureCharonProxy(charonPod.Spec.NodeName)
+	proxyPod, err := r.ensureCharonProxy(ipsecconnection, charonPod.Spec.NodeName)
 	if err != nil {
 		logger.Error(err, "Couldn't ensure charon proxy pod")
 		return nil, nil, err
@@ -127,8 +127,9 @@ func (r *IPSecConnectionReconciler) sendConfigToCharonPod(ctx context.Context, r
 func (r *IPSecConnectionReconciler) createCharonPod(ipsecconnection *ipmanv1.IPSecConnection) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ipmanv1.CharonPodName + "-" + ipsecconnection.Spec.NodeName,
-			Namespace: r.Env.NamespaceName,
+			Name:            ipmanv1.CharonPodName + "-" + ipsecconnection.Spec.NodeName,
+			Namespace:       r.Env.NamespaceName,
+			OwnerReferences: []metav1.OwnerReference{createOwnerReference(ipsecconnection)},
 			Labels: map[string]string{
 				ipmanv1.CharonPodServiceAnnotation: "true", // to get picked up by the service
 			},
@@ -153,7 +154,7 @@ func (r *IPSecConnectionReconciler) createCharonPod(ipsecconnection *ipmanv1.IPS
 	}
 }
 
-func (r *IPSecConnectionReconciler) ensureCharonProxy(nodeName string) (*corev1.Pod, error) {
+func (r *IPSecConnectionReconciler) ensureCharonProxy(ipsecconnection *ipmanv1.IPSecConnection, nodeName string) (*corev1.Pod, error) {
 	ctx := context.Background()
 	logger := log.FromContext(ctx)
 
@@ -166,7 +167,7 @@ func (r *IPSecConnectionReconciler) ensureCharonProxy(nodeName string) (*corev1.
 			return nil, err
 		}
 
-		proxyPod = r.createCharonProxyPod(proxyPodName, nodeName)
+		proxyPod = r.createCharonProxyPod(ipsecconnection, proxyPodName, nodeName)
 		err = r.Create(ctx, proxyPod)
 		if err != nil {
 			logger.Error(err, "Error creating proxy pod", "spec", *proxyPod)
@@ -184,12 +185,13 @@ func (r *IPSecConnectionReconciler) proxyPodNsn(name string) types.NamespacedNam
 	}
 }
 
-func (r *IPSecConnectionReconciler) createCharonProxyPod(proxyPodName, nodeName string) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createCharonProxyPod(ipsecconnection *ipmanv1.IPSecConnection, proxyPodName, nodeName string) *corev1.Pod {
 	url := fmt.Sprintf("unix/%s%s", ipmanv1.CharonApiSocketVolumePath, "restctl.sock")
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      proxyPodName,
-			Namespace: r.Env.NamespaceName,
+			Name:            proxyPodName,
+			Namespace:       r.Env.NamespaceName,
+			OwnerReferences: []metav1.OwnerReference{createOwnerReference(ipsecconnection)},
 		},
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
@@ -294,15 +296,16 @@ func (r *IPSecConnectionReconciler) restctlPodNsn(nodeName string) types.Namespa
 	}
 }
 
-func (r *IPSecConnectionReconciler) createRestctlPod(ipman *ipmanv1.IPSecConnection) *corev1.Pod {
+func (r *IPSecConnectionReconciler) createRestctlPod(ipsecconnection *ipmanv1.IPSecConnection) *corev1.Pod {
 	return &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      strings.Join([]string{ipmanv1.RestctlPodName, ipman.Spec.NodeName}, "-"),
-			Namespace: r.Env.NamespaceName,
+			Name:            strings.Join([]string{ipmanv1.RestctlPodName, ipsecconnection.Spec.NodeName}, "-"),
+			Namespace:       r.Env.NamespaceName,
+			OwnerReferences: []metav1.OwnerReference{createOwnerReference(ipsecconnection)},
 		},
 		Spec: corev1.PodSpec{
 			NodeSelector: map[string]string{
-				"kubernetes.io/hostname": ipman.Spec.NodeName,
+				"kubernetes.io/hostname": ipsecconnection.Spec.NodeName,
 			},
 			RestartPolicy: corev1.RestartPolicyNever,
 			Volumes: []corev1.Volume{
