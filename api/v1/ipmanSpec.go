@@ -18,8 +18,8 @@ type IPSecConnectionSpec struct {
 }
 
 type ConnData struct {
-	Secret string
-	IPSecConnection  IPSecConnection
+	Secret          string
+	IPSecConnection IPSecConnection
 }
 
 func (v *IPSecConnectionSpec) SerializeAllToConf(data []ConnData) string {
@@ -58,7 +58,7 @@ func (v *IPSecConnectionSpec) SerializeAllToConf(data []ConnData) string {
 		conns += "}\n"
 
 		secrets += fmt.Sprintf(`
-	%s {
+	ike-%s {
 		secret = "%s"
 		local-id = %s
 		remote-id = %s
@@ -77,51 +77,6 @@ connections {
 secrets {
 	%s
 }`, conns, secrets)
-}
-
-func (v *IPSecConnectionSpec) SerializeToConf(secret string) string {
-	serializedChildren := ""
-	for _, child := range v.Children {
-		serializedChildren += child.SerializeToConf()
-	}
-	conf := fmt.Sprintf(`
-connections {
-	%s {
-		remote_addrs = %s
-		local_addrs = %s
-		local {
-			auth = psk
-			id = %s
-		}
-		remote {
-			auth = psk
-			id = %s
-		}
-		children {
-			%s
-		}
-		version = 2
-		proposals = aes256-sha256-ecp256
-	}
-}
-secrets {
-	ike-%s {
-		secret = "%s"
-		local-id = %s
-		remote-id = %s
-	}
-}`,
-		v.Name,
-		v.RemoteAddr,
-		v.LocalAddr,
-		v.LocalId,
-		v.RemoteId,
-		serializedChildren,
-		v.Name,
-		secret,
-		v.LocalId,
-		v.RemoteId)
-	return conf
 }
 
 func (v IPSecConnectionSpec) DeepEqual(other IPSecConnectionSpec) bool {
