@@ -7,7 +7,7 @@ global:
 # Controller (operator) configuration
 controller:
   replicaCount: 1
-  image: "plan9better/operator:0.0.7"
+  image: "plan9better/operator:0.0.7-2"
   pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true
