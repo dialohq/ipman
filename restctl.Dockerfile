@@ -13,11 +13,11 @@ COPY api ./api
 
 RUN --mount=type=cache,target=/build GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o restctl ./cmd/restctl
 
-FROM nixos/nix
+FROM ubuntu:latest
 
 WORKDIR /
 
-RUN nix-env -iA nixpkgs.strongswan
+RUN apt update -y && apt install -y strongswan
 
 COPY --from=builder /workspace/restctl .
 

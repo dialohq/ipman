@@ -79,15 +79,18 @@ func validateIPSecConnectionDeletion(req *admissionv1.AdmissionRequest, workers 
 }
 
 func validateIPSecConnectionUnique(ipsecconnection ipmanv1.IPSecConnection) (bool, error) {
-	ips := sets.NewString()
+	ips := map[string][]string{}
 	ifids := sets.NewInt()
 	for _, c := range ipsecconnection.Spec.Children {
 		for _, pool := range c.IpPools {
 			for _, ip := range pool {
-				if ips.Has(ip) {
-					return false, fmt.Errorf("Duplicated ip across children: %s", ip)
+				if children, ok := ips[ip]; ok && slices.Contains(children, c.Name) {
+					return false, fmt.Errorf("Duplicated ip across pools: %s", ip)
 				}
-				ips.Insert(ip)
+				if ips[ip] == nil {
+					ips[ip] = []string{}
+				}
+				ips[ip] = append(ips[ip], c.Name)
 			}
 		}
 		if ifids.Has(c.XfrmIfId) {
