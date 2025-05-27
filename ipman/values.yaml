@@ -27,7 +27,7 @@ caddy:
   image: "caddy:2.10.0-alpine"
 # Restctl service configuration
 restctl:
-  image: "plan9better/restctl:0.0.7"
+  image: "plan9better/restctl:0.0.7-1"
 # VxlanLord configuration
 vxlandlord:
   image: "plan9better/vxlandlord:0.0.7"
