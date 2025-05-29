@@ -48,16 +48,16 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		writeResponseDenied(w, in)
 		return
 	}
+	if in.Request.Kind.Kind != "Pod" {
+		writeResponseNoPatch(w, in)
+		return
+	}
 	logger := log.FromContext(ctx, "webhook", true, "PodName", in.Request.Name)
 	isDryRun := false
 	if in.Request.DryRun != nil && *in.Request.DryRun == true {
 		isDryRun = true
 	}
 
-	if in.Request.Kind.Kind != "Pod" {
-		writeResponseNoPatch(w, in)
-		return
-	}
 	var pod corev1.Pod
 	json.Unmarshal(in.Request.Object.Raw, &pod)
 	childName, childOk := pod.Annotations[ipmanv1.AnnotationChildName]
@@ -159,12 +159,12 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	remoteJson, _ := json.Marshal(ipsecconnectionChild.RemoteIps)
 	localJson, _ := json.Marshal(ipsecconnectionChild.LocalIps)
 	annotations := map[string]string{
-		ipmanv1.AnnotationVxlanIp:          pool[0],
-		ipmanv1.AnnotationXfrmIp:           ipsecconnectionChild.XfrmIP,
-		ipmanv1.AnnotationIntefaceId:       strconv.FormatInt(int64(ipsecconnectionChild.XfrmIfId), 10),
-		ipmanv1.AnnotationRemoteIps:        string(remoteJson),
-		ipmanv1.AnnotationLocalIps:         string(localJson),
-		ipmanv1.AnnotationXfrmUnderlyingIp: ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name],
+		ipmanv1.AnnotationVxlanIP:          pool[0],
+		ipmanv1.AnnotationXfrmIP:           ipsecconnectionChild.XfrmIP,
+		ipmanv1.AnnotationIntefaceID:       strconv.FormatInt(int64(ipsecconnectionChild.XfrmIfId), 10),
+		ipmanv1.AnnotationRemoteIPs:        string(remoteJson),
+		ipmanv1.AnnotationLocalIPs:         string(localJson),
+		ipmanv1.AnnotationXfrmUnderlyingIP: ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name],
 	}
 	ip := pool[0]
 	if val, ok := ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name]; !ok || val == "" {
@@ -240,7 +240,7 @@ func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
 	for i := range p.Spec.Containers {
 		env := []corev1.EnvVar{
 			{
-				Name:  ipmanv1.WorkerContainerVxlanIpEnvVarName,
+				Name:  ipmanv1.WorkerContainerVxlanIPEnvVarName,
 				Value: ip,
 			},
 		}
@@ -268,6 +268,14 @@ func createAnnotationPatch(annotations map[string]string) []jsonPatch {
 		})
 	}
 	return patches
+}
+
+func createLabelPatch(child ipmanv1.Child) jsonPatch {
+	return jsonPatch{
+		Op:    "add",
+		Path:  "/metadata/labels/ipman.dialo.ai~1worker",
+		Value: child.Name,
+	}
 }
 
 func createInitContainerPatch(p *corev1.Pod, child ipmanv1.Child, gateway, ip, image string) *jsonPatch {
@@ -304,6 +312,7 @@ func patch(p *corev1.Pod, ip string, gateway string, annotations map[string]stri
 		return []byte{}
 	}
 	patch = append(patch, ep...)
+	patch = append(patch, createLabelPatch(child))
 
 	out, err := json.Marshal(patch)
 	if err != nil {

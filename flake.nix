@@ -18,7 +18,10 @@
   }:
     flake-utils.lib.eachDefaultSystem (
       system: let
-        pkgs = import nixpkgs {inherit system;};
+        pkgs = import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
         n2cPkgs = nix2container.packages."${system}";
 
         operator = pkgs.buildGoModule {
@@ -50,16 +53,91 @@
               cp ${operator}/bin/operator $out/bin/
             '';
         };
-      in {
+        nixosModules.base = {pkgs, ...}: {
+          system.stateVersion = "22.05";
+
+          # Configure networking
+          networking.useDHCP = false;
+          networking.interfaces.eth0.useDHCP = true;
+          virtualisation.docker = {
+            enable = true;
+          };
+
+          services.openssh.enable = true;
+
+          # Create user "test"
+          services.getty.autologinUser = "test";
+          users.users.test.isNormalUser = true;
+          users.users.test.openssh.authorizedKeys.keys = [
+            "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIK5iBILAktGPQc+wxxfAXAWEnyN1ygEjodzem6FLKdnH patrykwojnarowski@ringo"
+          ];
+
+          # Enable passwordless ‘sudo’ for the "test" user
+          users.users.test.extraGroups = ["wheel"];
+          security.sudo.wheelNeedsPassword = false;
+          nix.settings.experimental-features = ["flakes" "nix-command"];
+
+          services.k3s = {
+            enable = true;
+            extraFlags = [
+              "--docker"
+              "--container-runtime-endpoint /mnt/host/var/run/docker.sock"
+            ];
+          };
+        };
+        nixosModules.vm = {
+          virtualisation.vmVariantWithBootLoader.virtualisation = {
+            sharedDirectories.docksock = {
+              source = "/Users/patrykwojnarowski/.orbstack/run";
+              target = "/mnt/host/var/run";
+              securityModel = "passthrough";
+            };
+            graphics = false;
+            forwardPorts = [
+              {
+                from = "host";
+                host.port = 2222;
+                guest.port = 22;
+              }
+            ];
+            vlans = [1 2];
+
+            interfaces.eth0 = {
+              vlan = 1;
+              assignIP = true;
+            };
+          };
+        };
+        lib = pkgs.lib;
+      in rec {
         packages = {
           operator = operator;
           operatorImage = operatorImage;
+          linuxVM = nixosConfigurations.linuxVM.config.system.build.vm;
+          linuxSystem = nixosConfigurations.linuxVM;
+          img = lib.makeDiskImage {};
         };
 
+        nixosConfigurations.linuxVM = nixpkgs.lib.nixosSystem {
+          system = "aarch64-linux";
+          modules = [
+            nixosModules.base
+            nixosModules.vm
+            {
+              virtualisation.vmVariant.virtualisation.host.pkgs = nixpkgs.legacyPackages.aarch64-darwin;
+            }
+          ];
+        };
         devShells.default = pkgs.mkShell {
           packages = with pkgs; [
-            go
+            golint
+            golangci-lint
+            golangci-lint-langserver
             gopls
+            act
+            delve
+            go
+            # gopls
             gnumake
             tokei # loc count
             dockerfile-language-server-nodejs
@@ -68,13 +146,18 @@
             kuttl # kubernetes tests
             kubernetes-helm
             helm-ls
+            claude-code
+            kubernetes-controller-tools
+            dust
+            nixos-rebuild
+            nixos-generators
           ];
           shellHook = ''
             zsh
             go mod tidy
           '';
           env = {
-            KUBECONFIG = "/Users/patrykwojnarowski/dev/work/kubeconfig";
+            KUBECONFIG = "/Users/patrykwojnarowski/dev/work/ipman/vm.kubeconfig";
             CHARON_POD_NAME = "charon-pod";
             XFRM_POD_NAME = "xfrm-pod";
             NAMESPACE_NAME = "ims";

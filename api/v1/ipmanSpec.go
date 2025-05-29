@@ -22,7 +22,7 @@ type ConnData struct {
 	IPSecConnection IPSecConnection
 }
 
-func (v *IPSecConnectionSpec) SerializeAllToConf(data []ConnData) string {
+func SerializeAllToConf(data []ConnData) string {
 	conns := ""
 	secrets := ""
 	for _, d := range data {
@@ -52,8 +52,8 @@ func (v *IPSecConnectionSpec) SerializeAllToConf(data []ConnData) string {
 			d.IPSecConnection.Spec.RemoteId,
 			serializedChildren,
 		)
-		for k, v := range d.IPSecConnection.Spec.Extra {
-			conns += fmt.Sprintf("%s = %s\n", k, v)
+		for k, val := range d.IPSecConnection.Spec.Extra {
+			conns += fmt.Sprintf("%s = %s\n", k, val)
 		}
 		conns += "}\n"
 

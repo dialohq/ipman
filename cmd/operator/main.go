@@ -38,14 +38,19 @@ func main() {
 		logger.Error(err, "Creating manager failed")
 		os.Exit(1)
 	}
+	// TODO: validate everything is not nil else error
 	e := controller.Envs{
-		NamespaceName:     os.Getenv("NAMESPACE_NAME"),
-		XfrminionImage:    os.Getenv("XFRMINION_IMAGE"),
-		VxlandlordImage:   os.Getenv("VXLANDLORD_IMAGE"),
-		RestctlImage:      os.Getenv("RESTCTL_IMAGE"),
-		CaddyImage:        os.Getenv("CADDY_IMAGE"),
-		CharonDaemonImage: os.Getenv("CHARONDAEMON_IMAGE"),
-		HostSocketsPath:   os.Getenv("HOST_SOCKETS_PATH"),
+		NamespaceName:          os.Getenv("NAMESPACE_NAME"),
+		XfrminionImage:         os.Getenv("XFRMINION_IMAGE"),
+		VxlandlordImage:        os.Getenv("VXLANDLORD_IMAGE"),
+		RestctlImage:           os.Getenv("RESTCTL_IMAGE"),
+		RestctlPullPolicy:      os.Getenv("RESTCTL_PULL_POLICY"),
+		CaddyImage:             os.Getenv("CADDY_IMAGE"),
+		CharonDaemonImage:      os.Getenv("CHARONDAEMON_IMAGE"),
+		HostSocketsPath:        os.Getenv("HOST_SOCKETS_PATH"),
+		XfrminionPullPolicy:    os.Getenv("XFRMINION_PULL_POLICY"),
+		CharonDaemonPullPolicy: os.Getenv("CHARON_PULL_POLICY"),
+		CaddyProxyPullPolicy:   os.Getenv("PROXY_PULL_POLICY"),
 	}
 
 	logger.Info("Creating controller")

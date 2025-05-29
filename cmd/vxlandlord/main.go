@@ -12,6 +12,7 @@ import (
 
 	"dialo.ai/ipman/pkg/netconfig"
 	u "dialo.ai/ipman/pkg/utils"
+	probing "github.com/prometheus-community/pro-bing"
 	ip "github.com/vishvananda/netlink"
 )
 
@@ -146,4 +147,23 @@ func main() {
 		u.Fatal(err, logger, "Error adding route", "route", r)
 		logger.Info("Added route", "route", r)
 	}
+	pinger, err := probing.NewPinger(xfrmIp)
+	if err != nil {
+		logger.Info("Error creating a new pinger", "msg", err, "addr", xfrmIpAddr)
+	}
+
+	c := make(chan int, 1)
+	go func() {
+		for range c {
+			pinger.Stop()
+		}
+	}()
+
+	pinger.OnRecv = func(pkt *probing.Packet) {
+		logger.Info("Received a packet", "bytes", pkt.Nbytes, "from", pkt.IPAddr, "seq", pkt.Seq, "time", pkt.Rtt)
+		c <- 0
+	}
+
+	logger.Info("Pinging xfrm")
+
 }
