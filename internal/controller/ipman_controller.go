@@ -2,71 +2,382 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
+
+	"reflect"
 	"slices"
 	"strings"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
+	ipmanv1 "dialo.ai/ipman/api/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/apimachinery/pkg/types"
-	ctrl "sigs.k8s.io/controller-runtime"
+	"k8s.io/apimachinery/pkg/selection"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
-	ipmanv1 "dialo.ai/ipman/api/v1"
-	"dialo.ai/ipman/pkg/comms"
+	"github.com/r3labs/diff/v3"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
 
+// Envs holds environment configuration values for the IPSec controller
 type Envs struct {
-	NamespaceName     string
-	HostSocketsPath   string
-	XfrminionImage    string
-	VxlandlordImage   string
-	RestctlImage      string
-	CaddyImage        string
-	CharonDaemonImage string
+	NamespaceName          string
+	HostSocketsPath        string
+	XfrminionImage         string
+	XfrminionPullPolicy    string
+	CharonDaemonImage      string
+	CharonDaemonPullPolicy string
+	VxlandlordImage        string
+	RestctlImage           string
+	RestctlPullPolicy      string
+	CaddyImage             string
+	CaddyProxyPullPolicy   string
 }
 
+// IPSecConnectionReconciler reconciles IPSecConnection resources
 type IPSecConnectionReconciler struct {
 	client.Client
 	Scheme *runtime.Scheme
 	Env    Envs
 }
 
-func (r *IPSecConnectionReconciler) isReconcilingKindIPSecConnection(ctx context.Context, req reconcile.Request) (bool, error) {
-	im := &ipmanv1.IPSecConnection{}
-	err := r.Get(ctx, req.NamespacedName, im)
-	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
-	}
-	return true, nil
+// RequestError represents an error that occurred during a Kubernetes API request
+type RequestError struct {
+	ActionType string `json:"action_type"`
+	Resource   string `json:"resource"`
+	Err        error  `json:"error"`
 }
 
-func (r *IPSecConnectionReconciler) isReconcilingKindPod(ctx context.Context, req reconcile.Request) (bool, error) {
-	pod := &corev1.Pod{}
-	err := r.Get(ctx, req.NamespacedName, pod)
+// Error returns a formatted error string for RequestError
+func (e *RequestError) Error() string {
+	return fmt.Sprintf("Error while trying to %s %s: %s", e.ActionType, e.Resource, e.Err.Error())
+}
+
+// GetClusterNodes returns a list of all node names in the cluster
+func (r *IPSecConnectionReconciler) GetClusterNodes(ctx context.Context) ([]string, error) {
+	nl := &corev1.NodeList{}
+	err := r.List(ctx, nl)
 	if err != nil {
-		if apierrors.IsNotFound(err) {
-			return false, nil
-		}
-		return false, err
+		e := &RequestError{ActionType: "List", Resource: "Nodes", Err: err}
+		return nil, e
+	}
+	ns := []string{}
+	for _, n := range nl.Items {
+		ns = append(ns, n.Name)
+	}
+	return ns, nil
+}
+
+// GetClusterPodsByType returns all pods in the controller's namespace with the specified pod type label
+func (r *IPSecConnectionReconciler) GetClusterPodsByType(ctx context.Context, podType string) ([]corev1.Pod, error) {
+	ps := &corev1.PodList{}
+	vs, err := labels.ValidatedSelectorFromSet(labels.Set{
+		ipmanv1.LabelPodType: podType,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("Error creating label selector, this is a bug in the operator: %w", err)
+	}
+	opts := client.ListOptions{
+		LabelSelector: vs,
 	}
 
-	if pod.GetDeletionTimestamp() != nil {
-		return false, nil
+	err = r.List(ctx, ps, opts.ApplyOptions(nil))
+	if err != nil {
+		e := &RequestError{ActionType: "List", Resource: "Pods", Err: err}
+		return nil, e
 	}
-	return true, nil
+
+	return ps.Items, nil
+
+}
+
+// ExtractCharonVolumeSocketPath gets the path to the Charon socket from a pod's volume definitions
+func ExtractCharonVolumeSocketPath(p *corev1.Pod) string {
+	var CharonSocketVolume *corev1.Volume
+	for _, c := range p.Spec.Volumes {
+		if c.Name == ipmanv1.CharonSocketHostVolumeName {
+			CharonSocketVolume = &c
+		}
+	}
+
+	if CharonSocketVolume == nil {
+		// This should never happen
+		fmt.Println("Volume with charon socket doesn't exist on charon pod!!")
+	}
+	return CharonSocketVolume.HostPath.Path
+}
+
+// ExtractContainerImage gets the image used by a container with the specified name in a pod
+func ExtractContainerImage(p *corev1.Pod, containerName string) string {
+	var img string
+	for _, c := range p.Spec.Containers {
+		if c.Name == containerName {
+			img = c.Image
+		}
+	}
+	return img
+}
+
+// CharonFromPod converts a Kubernetes Pod into an IpmanPod with CharonPodSpec
+func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
+	return IpmanPod[CharonPodSpec]{
+		Spec: CharonPodSpec{
+			HostPath: ExtractCharonVolumeSocketPath(p),
+		},
+		Meta: PodMeta{
+			Name:      p.Name,
+			Namespace: p.Namespace,
+			IP:        p.Status.PodIP,
+			Node:      p.Spec.NodeName,
+			Image:     ExtractContainerImage(p, ipmanv1.CharonDaemonContainerName),
+		},
+	}
+}
+
+// ProxyFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
+func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
+	return IpmanPod[ProxyPodSpec]{
+		Spec: ProxyPodSpec{
+			HostPath: ExtractCharonVolumeSocketPath(p),
+		},
+		Meta: PodMeta{
+			Name:      p.Name,
+			Namespace: p.Namespace,
+			IP:        p.Status.PodIP,
+			Node:      p.Spec.NodeName,
+			Image:     ExtractContainerImage(p, ipmanv1.CharonAPIProxyContainerName),
+		},
+	}
+}
+
+// GetClusterPodsAs retrieves cluster pods with a specific label and transforms them into typed IpmanPod objects
+func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionReconciler, label string, transformer func(*corev1.Pod) IpmanPod[S]) ([]IpmanPod[S], error) {
+	IpmanPods := []IpmanPod[S]{}
+	ps, err := r.GetClusterPodsByType(ctx, label)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, p := range ps {
+		IpmanPods = append(IpmanPods, transformer(&p))
+	}
+	return IpmanPods, nil
+}
+
+// XfrmFromPod converts a Kubernetes Pod into an IpmanPod with XfrmPodSpec,
+// extracting properties and routes from pod annotations
+func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
+	specJSON := p.Annotations[ipmanv1.AnnotationSpec]
+	spec := &XfrmPodSpec{}
+	_ = json.Unmarshal([]byte(specJSON), spec)
+	logger := log.FromContext(context.Background())
+	logger.Info("Xfrm from pod", "ip", p.Status.PodIP)
+
+	return IpmanPod[XfrmPodSpec]{
+		Meta: PodMeta{
+			Name:      p.Name,
+			Namespace: p.Namespace,
+			IP:        p.Status.PodIP,
+			Node:      p.Spec.NodeName,
+			Image:     ExtractContainerImage(p, ipmanv1.XfrminionContainerName),
+		},
+		Spec: *spec,
+	}
+
+}
+
+// FindPod finds a pod of the specified type on the given node
+func FindPod[S IpmanPodSpec](ps []IpmanPod[S], node string) *IpmanPod[S] {
+	for _, p := range ps {
+		if p.Meta.Node == node {
+			return &p
+		}
+	}
+	return nil
+}
+
+// FindXfrms returns all Xfrm pods that are on the specified node
+func FindXfrms(ps []IpmanPod[XfrmPodSpec], node string) []IpmanPod[XfrmPodSpec] {
+	return slices.DeleteFunc(ps, func(p IpmanPod[XfrmPodSpec]) bool {
+		return p.Meta.Node != node
+	})
+}
+func hasAnnotations(p *corev1.Pod) bool {
+	_, ok1 := p.Annotations[ipmanv1.AnnotationChildName]
+	_, ok2 := p.Annotations[ipmanv1.AnnotationIpmanName]
+	_, ok3 := p.Annotations[ipmanv1.AnnotationPoolName]
+	return (ok1 && ok2 && ok3)
+}
+
+func workerFromPod(p *corev1.Pod) Worker {
+	return Worker{
+		Meta: PodMeta{
+			Name:      p.Name,
+			Namespace: p.Namespace,
+			IP:        p.Status.PodIP,
+			Node:      p.Spec.NodeName,
+		},
+		Spec: WorkerPodSpec{
+			Routes: []Route{
+				Route(p.Annotations[ipmanv1.AnnotationRemoteIPs]),
+			},
+			OwnerConnection: p.Annotations[ipmanv1.AnnotationIpmanName],
+			OwnerChild:      p.Annotations[ipmanv1.AnnotationChildName],
+			VxlanIP:         p.Annotations[ipmanv1.AnnotationVxlanIP],
+		},
+	}
+}
+
+func (r *IPSecConnectionReconciler) GetWorkersState(ctx context.Context) (*WorkersState, error) {
+	done := false
+	state := &WorkersState{}
+	for !done {
+		pods := &corev1.PodList{}
+		err := r.List(ctx, pods)
+		if err != nil {
+			return nil, err
+		}
+
+		state2 := WorkersState{}
+		state2.Workers = []Worker{}
+		for _, p := range pods.Items {
+			if hasAnnotations(&p) {
+				if p.Status.PodIP != "" {
+					state2.Workers = append(state2.Workers, workerFromPod(&p))
+				} else {
+					time.Sleep(1 * time.Second)
+					break
+				}
+			}
+		}
+		done = true
+		state = &state2
+
+	}
+	return state, nil
+}
+
+// GetClusterState retrieves the current state of IPMan pods in the cluster
+func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*ClusterState, error) {
+	nodes, err := r.GetClusterNodes(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	charons, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueCharonPod, CharonFromPod)
+	if err != nil {
+		return nil, err
+	}
+
+	proxies, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueProxyPod, ProxyFromPod)
+	if err != nil {
+		return nil, err
+	}
+
+	xfrms, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueXfrmPod, XfrmFromPod)
+	if err != nil {
+		return nil, err
+	}
+	logger := log.FromContext(ctx)
+	logger.Info("xfrms in get cluster state", "xfrms", xfrms)
+
+	sortPods(xfrms)
+
+	cs := &ClusterState{
+		Nodes: []NodeState{},
+	}
+	for _, n := range nodes {
+		ns := NodeState{
+			Charon: FindPod(charons, n),
+			Proxy:  FindPod(proxies, n),
+			Xfrms: slices.DeleteFunc(xfrms, func(p IpmanPod[XfrmPodSpec]) bool {
+				return p.Meta.Node != n
+			}),
+			NodeName: n,
+		}
+		cs.Nodes = append(cs.Nodes, ns)
+	}
+	return cs, nil
+}
+
+func sortPods[Spec IpmanPodSpec](p []IpmanPod[Spec]) {
+	slices.SortFunc(p, func(a, b IpmanPod[Spec]) int {
+		return strings.Compare(a.Meta.Name, b.Meta.Name)
+	})
+}
+
+// CreateClusterNodes creates NodeState objects for all nodes referenced in IPSecConnections
+func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnection) []NodeState {
+	nodeNames := map[string]string{}
+	for _, c := range cl {
+		nodeNames[c.Spec.NodeName] = c.Name
+	}
+
+	chs := r.CreateCharons(cl)
+	prxs := r.CreateProxies(cl)
+	xfrms := r.CreateXfrms(cl)
+	sortPods(xfrms)
+
+	ns := []NodeState{}
+	for n := range maps.Keys(nodeNames) {
+		ns = append(ns, NodeState{
+			Charon:   FindPod(chs, n),
+			Proxy:    FindPod(prxs, n),
+			Xfrms:    FindXfrms(xfrms, n),
+			NodeName: n,
+		})
+	}
+
+	return ns
+}
+
+// CreateCharons creates Charon pod specifications for the given IPSecConnections
+func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection) []IpmanPod[CharonPodSpec] {
+	chs := []IpmanPod[CharonPodSpec]{}
+	for _, c := range cl {
+		ch := IpmanPod[CharonPodSpec]{}
+		ch.Meta = PodMeta{
+			Node:      c.Spec.NodeName,
+			Name:      strings.Join([]string{ipmanv1.CharonPodName, c.Spec.NodeName}, "-"),
+			Namespace: r.Env.NamespaceName,
+			Image:     r.Env.CharonDaemonImage,
+		}
+		ch.Spec = CharonPodSpec{
+			HostPath: r.Env.HostSocketsPath,
+		}
+		chs = append(chs, ch)
+	}
+	return chs
+}
+
+// CreateProxies creates Proxy pod specifications for the given IPSecConnections
+func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection) []IpmanPod[ProxyPodSpec] {
+	prxs := []IpmanPod[ProxyPodSpec]{}
+	for _, c := range cl {
+		prx := IpmanPod[ProxyPodSpec]{}
+		prx.Meta = PodMeta{
+			Node:      c.Spec.NodeName,
+			Name:      strings.Join([]string{ipmanv1.ProxyPodName, c.Spec.NodeName}, "-"),
+			Namespace: r.Env.NamespaceName,
+			Image:     r.Env.CaddyImage,
+		}
+		prx.Spec = ProxyPodSpec{
+			r.Env.HostSocketsPath,
+		}
+		prxs = append(prxs, prx)
+	}
+	return prxs
 }
 
 // returns time after which to requeue ipsecconnection
@@ -114,7 +425,6 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection 
 			podsWithAnnotation = append(podsWithAnnotation, &p)
 		}
 	}
-
 	// TODO: if it turns out it's taking too long we can reverse sort by
 	// timestamp and stop after we reach the first still valid
 	maps.DeleteFunc(ipsecconnection.Status.PendingIPs, func(ip string, timestamp string) bool {
@@ -124,16 +434,16 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection 
 			return true
 		}
 		contains := slices.ContainsFunc(podsWithAnnotation, func(p *corev1.Pod) bool {
-			return p.Annotations[ipmanv1.AnnotationVxlanIp] == ip
+			return p.Annotations[ipmanv1.AnnotationVxlanIP] == ip
 		})
-		timePassed := time.Now().After(ts.Add(time.Second * time.Duration(ipmanv1.ReconcilerPendingIpsTimeoutSeconds)))
+		timePassed := time.Now().After(ts.Add(time.Second * time.Duration(ipmanv1.ReconcilerPendingIPsTimeoutSeconds)))
 
 		return contains || timePassed
 	})
 
 	podIpList := []string{}
 	for _, p := range podsWithAnnotation {
-		podIpList = append(podIpList, p.Annotations[ipmanv1.AnnotationVxlanIp])
+		podIpList = append(podIpList, p.Annotations[ipmanv1.AnnotationVxlanIP])
 	}
 
 	for cn, pools := range ipsecconnection.Status.FreeIPs {
@@ -157,7 +467,7 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection 
 		// ignored since already checked above
 		// maybe combine it if there is a lot of them :TODO
 		t, _ := time.Parse(time.Layout, v)
-		sortedPending = append(sortedPending, t.Add(time.Second*ipmanv1.ReconcilerPendingIpsTimeoutSeconds).Sub(time.Now()))
+		sortedPending = append(sortedPending, t.Add(time.Second*ipmanv1.ReconcilerPendingIPsTimeoutSeconds).Sub(time.Now()))
 	}
 	if len(sortedPending) == 0 {
 		return nil, nil
@@ -167,127 +477,469 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection 
 	return &requeueIn, nil
 }
 
-func (r *IPSecConnectionReconciler) reconcileIPSecConnection(ctx context.Context, req reconcile.Request) error {
+// CreateXfrms creates Xfrm pod specifications for each child in the given IPSecConnections
+func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []IpmanPod[XfrmPodSpec] {
+	ctx := context.Background()
 	logger := log.FromContext(ctx)
-
-	ipsecconnection := &ipmanv1.IPSecConnection{}
-	if err := r.Get(ctx, req.NamespacedName, ipsecconnection); err != nil {
-		logger.Error(err, "Error getting ipsecconnection instance")
-		return err
-	}
-
-	secret := &corev1.Secret{}
-	err := r.Get(ctx, types.NamespacedName{
-		Name:      ipsecconnection.Spec.SecretRef.Name,
-		Namespace: ipsecconnection.Spec.SecretRef.Namespace}, secret)
+	xfrms := []IpmanPod[XfrmPodSpec]{}
+	workers, err := r.CreateWorkers(ctx)
 	if err != nil {
-		logger.Error(err, "Failed to find secret", "secretName", ipsecconnection.Spec.SecretRef.Name)
-		return err
+		logger.Error(err, "Couldn't fetch workers")
+		return nil
 	}
-
-	_, proxyPod, err := r.ensureCharonPod(ctx, ipsecconnection)
-	if err != nil {
-		return fmt.Errorf("failed to ensure Charon pod: %w", err)
-	}
-
-	if err := r.Get(ctx, req.NamespacedName, ipsecconnection); err != nil {
-		logger.Error(err, "Error getting ipsecconnection instance to update status in ensuring charon pod")
-		return err
-	}
-
-	ipsecconnection.Status.CharonProxyIP = proxyPod.Status.PodIP
-	err = r.Status().Update(ctx, ipsecconnection)
-	if err != nil {
-		logger.Error(err, "Could't update status of ipsecconnection to add charon pod ip")
-		return err
-	}
-
-	for childName, c := range ipsecconnection.Spec.Children {
-		xfrmPod, err := r.ensureXfrmPod(ipsecconnection, ctx, &c)
-		if err != nil {
-			logger.Error(err, "error creating xfrmpod")
-			return err
+	for _, w1 := range workers {
+		for _, w2 := range w1 {
+			for _, w3 := range w2 {
+				logger.Info("worker names", "name", w3.Meta.Name, "namespace", w3.Meta.Namespace, "child", w3.Spec.OwnerChild)
+			}
 		}
-
-		if ipsecconnection.Status.XfrmGatewayIPs == nil {
-			ipsecconnection.Status.XfrmGatewayIPs = map[string]string{}
+	}
+	logger.Info("Fetched workers while creating xfrms", "workers", len(workers))
+	for _, conn := range cl {
+		for _, c := range conn.Spec.Children {
+			ws := workers[conn.Name][c.Name]
+			bfdbs := LocalRoutes{}
+			for _, w := range ws {
+				bfdbs[w.Spec.VxlanIP] = w.Meta.IP
+			}
+			x := IpmanPod[XfrmPodSpec]{}
+			x.Spec = XfrmPodSpec{
+				Props: XfrmProperties{
+					OwnerChild:      c.Name,
+					OwnerConnection: conn.Name,
+					InterfaceID:     uint32(c.XfrmIfId),
+					XfrmIP:          c.XfrmIP,
+					VxlanIP:         c.VxlanIP,
+				},
+				Routes: Routes{
+					Local:     c.LocalIps,
+					Remote:    c.RemoteIps,
+					BridgeFDB: bfdbs,
+				},
+			}
+			x.Meta = PodMeta{
+				Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, conn.Name}, "-"),
+				Namespace: r.Env.NamespaceName,
+				Node:      conn.Spec.NodeName,
+				Image:     r.Env.XfrminionImage,
+			}
+			xfrms = append(xfrms, x)
 		}
-		if ipsecconnection.Status.XfrmGatewayIPs[childName] != xfrmPod.Status.PodIP {
-			ipsecconnection.Status.XfrmGatewayIPs[childName] = xfrmPod.Status.PodIP
-			err = r.Status().Update(ctx, ipsecconnection)
-			if err != nil {
-				logger.Error(err, "Error changing status of ipsecconnection", "ipsecconnection", ipsecconnection)
-				return err
+	}
+	return xfrms
+}
+
+func (r *IPSecConnectionReconciler) CreateNodes(ctx context.Context) ([]NodeState, error) {
+	cl := &ipmanv1.IPSecConnectionList{}
+	err := r.List(ctx, cl)
+	if err != nil {
+		e := &RequestError{ActionType: "List", Resource: "IPSecConnections", Err: err}
+		return nil, e
+	}
+	ns := r.CreateClusterNodes(cl.Items)
+	slices.SortFunc(ns, func(a, b NodeState) int {
+		return strings.Compare(a.NodeName, b.NodeName)
+	})
+	return ns, nil
+}
+
+func (r *IPSecConnectionReconciler) CreateWorkers(ctx context.Context) (map[string]map[string][]Worker, error) {
+	logger := log.FromContext(ctx)
+	ps := &corev1.PodList{}
+	sel := labels.NewSelector()
+	req, err := labels.NewRequirement(ipmanv1.LabelWorker, selection.Exists, nil)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating label requirement, this is a bug in the operator: %w", err)
+	}
+	sel = sel.Add(*req)
+	opts := client.ListOptions{}
+	err = r.List(ctx, ps, &opts)
+	if err != nil {
+		return nil, err
+	}
+	logger.Info("Listed workers", "list", len(ps.Items))
+	// structure:
+	// 	connection1:
+	// 		child1:
+	// 			- worker
+	// 			- worker
+	// 			- worker
+	// 		child2:
+	// 			- worker
+	// 			- worker
+	// 			- worker
+	// 	connection2:
+	// 		child3:
+	// 			- worker
+	// 			- worker
+	// 			- worker
+	// 		child4:
+	// 			- worker
+	// 			- worker
+	// 			- worker
+	//
+	//
+	ws := map[string]map[string][]Worker{}
+	for _, p := range ps.Items {
+		podChn := p.Labels[ipmanv1.LabelWorker]
+		podCon := p.Annotations[ipmanv1.AnnotationIpmanName]
+		if _, ok := ws[podCon]; !ok {
+			ws[podCon] = map[string][]Worker{}
+		}
+		if _, ok := ws[podCon][podChn]; !ok {
+			ws[podCon][podChn] = []Worker{}
+		}
+		ws[podCon][podChn] = append(ws[podCon][podChn], workerFromPod(&p))
+	}
+	return ws, nil
+}
+
+// CreateDesiredState creates a ClusterState representing the desired state based on IPSecConnections
+func (r *IPSecConnectionReconciler) CreateDesiredState(ctx context.Context) (*ClusterState, error) {
+	ns, err := r.CreateNodes(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("Error creating nodes: %w", err)
+	}
+
+	return &ClusterState{Nodes: ns}, nil
+}
+
+func IsNodeChanged(c diff.Change) bool {
+	return reflect.DeepEqual(c.Path, []string{"meta", "node"})
+}
+
+func isCreated(c diff.Change) bool {
+	return (len(c.Path) == 0 && c.To != nil)
+}
+func isDeleted(c diff.Change) bool {
+	return (len(c.Path) == 0 && c.To == nil)
+}
+
+func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *IpmanPod[Spec]) []Action {
+	changelog, _ := diff.Diff(desired, current)
+	if len(changelog) == 0 {
+		return []Action{}
+	}
+
+	if desired == nil {
+		return []Action{&DeletePodAction[Spec]{Pod: current}}
+	}
+
+	if current == nil {
+		return []Action{&CreatePodAction[Spec]{Pod: desired}}
+	}
+
+	return []Action{&DeletePodAction[Spec]{Pod: current}, &CreatePodAction[Spec]{Pod: desired}}
+
+}
+
+func diffCharon(desired *IpmanPod[CharonPodSpec], current *IpmanPod[CharonPodSpec]) []Action {
+	return diffImmutablePod(desired, current)
+}
+
+func diffProxy(desired *IpmanPod[ProxyPodSpec], current *IpmanPod[ProxyPodSpec]) []Action {
+	return diffImmutablePod(desired, current)
+}
+
+func recreatePod[S IpmanPodSpec](old, new *IpmanPod[S]) []Action {
+	return []Action{&DeletePodAction[S]{Pod: old}, &CreatePodAction[S]{Pod: new}}
+}
+
+func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
+	logger := log.FromContext(context.Background())
+	acts := []Action{}
+	clr := current.Spec.Routes.Local
+	dlr := desired.Spec.Routes.Local
+	slices.Sort(clr)
+	slices.Sort(dlr)
+	logger.Info("Diffing local routes", "current", clr, "desired", clr)
+	if !reflect.DeepEqual(clr, dlr) {
+		cl, _ := diff.Diff(clr, dlr)
+		for _, change := range cl {
+			switch change.Type {
+			case "create":
+				val, ok := change.To.(string)
+				if !ok {
+					return nil, fmt.Errorf("desired value is not a string: %+v", change)
+				} else {
+					acts = append(acts, &AddLocalRouteAction{Route: val, Pod: current})
+				}
+			case "delete":
+				val, ok := change.From.(string)
+				if !ok {
+					return nil, fmt.Errorf("current value is not a string: %+v", change)
+				} else {
+					acts = append(acts, &DeleteLocalRouteAction{Route: val, Pod: current})
+				}
+			case "update":
+				if change.To == nil {
+					valFrom, ok := change.From.(string)
+					if !ok {
+						return nil, fmt.Errorf("On update local route, verdict=delete, from value is not a string: %+v", change)
+					}
+					acts = append(acts, &DeleteLocalRouteAction{Route: valFrom, Pod: current})
+					break
+				}
+				if change.From == nil {
+					valTo, ok := change.To.(string)
+					if !ok {
+						return nil, fmt.Errorf("On update local route, verdict=create, to value is not a string: %+v", change)
+					}
+					acts = append(acts, &AddLocalRouteAction{Route: valTo, Pod: current})
+					break
+				}
+				valFrom, ok := change.From.(string)
+				valTo, ok2 := change.To.(string)
+				if !(ok && ok2) {
+					return nil, fmt.Errorf("on update local route, verdict=update, one of the values is not a string: %+v", change)
+				} else {
+					acts = append(acts, &DeleteLocalRouteAction{Route: valFrom, Pod: current}, &AddLocalRouteAction{Route: valTo, Pod: current})
+				}
 			}
 		}
 	}
 
-	return nil
-}
-
-func (r *IPSecConnectionReconciler) reconcilePod(ctx context.Context, req reconcile.Request) error {
-	logger := log.FromContext(ctx)
-
-	pod := &corev1.Pod{}
-	err := r.Get(ctx, req.NamespacedName, pod)
-	if err != nil {
-		return fmt.Errorf("error fetching reconciled pod: %w", err)
-	}
-
-	logger.Info("Waiting for pod to get assigned ip", "pod", pod.Name)
-	for pod.Status.PodIP == "" {
-		time.Sleep(1 * time.Second)
-		err = r.Get(ctx, req.NamespacedName, pod)
-		if err != nil {
-			return fmt.Errorf("Couldn't fetch pod while reconciling: %w", err)
+	crr := current.Spec.Routes.Remote
+	drr := desired.Spec.Routes.Remote
+	slices.Sort(crr)
+	slices.Sort(drr)
+	logger.Info("Diffing remote routes", "current", crr, "desired", crr)
+	if !reflect.DeepEqual(crr, drr) {
+		cl, _ := diff.Diff(crr, drr)
+		for _, change := range cl {
+			switch change.Type {
+			case "create":
+				val, ok := change.To.(string)
+				if !ok {
+					return nil, fmt.Errorf("desired value is not a string: %+v", change)
+				} else {
+					acts = append(acts, &AddRemoteRouteAction{Route: val, Pod: current})
+				}
+			case "delete":
+				val, ok := change.From.(string)
+				if !ok {
+					return nil, fmt.Errorf("current value is not a string: %+v", change)
+				} else {
+					acts = append(acts, &DeleteRemoteRouteAction{Route: val, Pod: current})
+				}
+			case "update":
+				if change.To == nil {
+					valFrom, ok := change.From.(string)
+					if !ok {
+						return nil, fmt.Errorf("On update Remote route, verdict=delete, from value is not a string: %+v", change)
+					}
+					acts = append(acts, &DeleteRemoteRouteAction{Route: valFrom, Pod: current})
+					break
+				}
+				if change.From == nil {
+					valTo, ok := change.To.(string)
+					if !ok {
+						return nil, fmt.Errorf("On update Remote route, verdict=create, to value is not a string: %+v", change)
+					}
+					acts = append(acts, &AddRemoteRouteAction{Route: valTo, Pod: current})
+					break
+				}
+				valFrom, ok := change.From.(string)
+				valTo, ok2 := change.To.(string)
+				if !(ok && ok2) {
+					return nil, fmt.Errorf("on update Remote route, verdict=update, one of the values is not a string: %+v", change)
+				} else {
+					acts = append(acts, &DeleteRemoteRouteAction{Route: valFrom, Pod: current}, &AddRemoteRouteAction{Route: valTo, Pod: current})
+				}
+			}
 		}
 	}
-	logger.Info("Pod got assigned ip", "pod", pod.Name, "ip", pod.Status.PodIP)
 
-	vxlanIp, ok := pod.Annotations[ipmanv1.AnnotationVxlanIp]
-	if !ok {
-		return fmt.Errorf("Annotation vxlanIp not present")
+	cfdb := current.Spec.Routes.BridgeFDB
+	dfdb := desired.Spec.Routes.BridgeFDB
+	logger.Info("comparing desired and current bfdbs", "desired", dfdb, "currnet", cfdb)
+	if !reflect.DeepEqual(cfdb, dfdb) {
+		cl, _ := diff.Diff(cfdb, dfdb)
+		for _, c := range cl {
+			logger.Info("Found a change in BFDB", "chagne", c)
+			switch c.Type {
+			case "update":
+				if c.To == nil {
+					valFrom, ok := c.From.(string)
+					if !ok {
+						return nil, fmt.Errorf("On update bridge fdb, verdict=delete, from value is not a string: %+v", c)
+					}
+					acts = append(acts, &DeleteBridgeFDBAction{UnderlyingIP: valFrom, Pod: current, VxlanIP: c.Path[0]})
+					break
+				}
+				if c.From == nil {
+					valTo, ok := c.To.(string)
+					if !ok {
+						return nil, fmt.Errorf("On update bridge fdb, verdict=create, to value is not a string: %+v", c)
+					}
+					acts = append(acts, &AddBridgeFDBAction{UnderlyingIP: valTo, Pod: current, VxlanIP: c.Path[0]})
+					break
+				}
+				valFrom, ok := c.From.(string)
+				valTo, ok2 := c.To.(string)
+				if !(ok && ok2) {
+					return nil, fmt.Errorf("on update bridge fdb, verdict=update, one of the values is not a string: %+v", c)
+				} else {
+					acts = append(acts, &DeleteBridgeFDBAction{UnderlyingIP: valFrom, Pod: current, VxlanIP: c.Path[0]}, &AddBridgeFDBAction{UnderlyingIP: valTo, Pod: current, VxlanIP: c.Path[0]})
+				}
+			case "create":
+				logger.Info("Case create")
+				val, ok := c.To.(string)
+				if !ok {
+					return nil, fmt.Errorf("desired value is not a string: %+v", c)
+				} else {
+					acts = append(acts, &AddBridgeFDBAction{UnderlyingIP: val, VxlanIP: c.Path[0], Pod: current})
+				}
+			case "delete":
+				logger.Info("Case delete")
+				val, ok := c.From.(string)
+				if !ok {
+					return nil, fmt.Errorf("desired value is not a string: %+v", c)
+				} else {
+					acts = append(acts, &DeleteBridgeFDBAction{UnderlyingIP: val, VxlanIP: c.Path[0], Pod: current})
+				}
+			default:
+				return nil, fmt.Errorf("Unexpected operation, expected 'update', 'create' or 'delete'. Got: %+v", c)
+			}
+		}
 	}
-	ifid, ok := pod.Annotations[ipmanv1.AnnotationIntefaceId]
-	if !ok {
-		return fmt.Errorf("Annotation interfaceid not present")
+	logger.Info("Final actions after diffing routes", "actions", acts)
+	return acts, nil
+}
+
+// createXfrmPod returns a list of actions to get a xfrm pod with desired routes
+func createXfrmPod(x IpmanPod[XfrmPodSpec]) []Action {
+	acts := []Action{}
+	rs := x.Spec.Routes
+	x.Spec.Routes = Routes{}
+	acts = append(acts, &CreatePodAction[XfrmPodSpec]{Pod: &x})
+
+	for _, lr := range rs.Local {
+		acts = append(acts, &AddLocalRouteAction{Route: lr, Pod: x})
+	}
+	for _, rr := range rs.Remote {
+		acts = append(acts, &AddRemoteRouteAction{Route: rr, Pod: x})
+	}
+	for vxlanIP, podIP := range rs.BridgeFDB {
+		acts = append(acts, &AddBridgeFDBAction{VxlanIP: vxlanIP, UnderlyingIP: podIP, Pod: x})
+	}
+	return acts
+}
+
+func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
+	logger := log.FromContext(context.Background())
+	if reflect.DeepEqual(desired, current) {
+		return []Action{}
+	}
+	// This should be sufficient since namespace will always be the same,
+	// and node has to be checked anyway, and name contains owner connection
+	// and owner child info
+	compareXfrms := func(a, b IpmanPod[XfrmPodSpec]) int {
+		return strings.Compare(a.Meta.Name, b.Meta.Name)
+	}
+	slices.SortFunc(desired, compareXfrms)
+	slices.SortFunc(current, compareXfrms)
+
+	acts := []Action{}
+	for _, x := range desired {
+		idx, exists := slices.BinarySearchFunc(current, x, compareXfrms)
+		if !exists {
+			acts = append(acts, createXfrmPod(x)...)
+			continue
+		}
+		if reflect.DeepEqual(x, current[idx]) {
+			continue
+		}
+		if !reflect.DeepEqual(x.Spec.Props, current[idx].Spec.Props) {
+			acts = append(acts, recreatePod(&current[idx], &x)...)
+			continue
+		}
+		if x.Meta.Node != current[idx].Meta.Node {
+			acts = append(acts, recreatePod(&current[idx], &x)...)
+			continue
+		}
+		if !reflect.DeepEqual(x.Spec.Routes, current[idx].Spec.Routes) {
+			actions, err := diffRoutes(current[idx], x)
+			if err != nil {
+				logger.Error(err, "Route in xfrm is invalid")
+			} else {
+				acts = append(acts, actions...)
+			}
+		}
 	}
 
-	ipsecconnection := &ipmanv1.IPSecConnection{}
-	err = r.Get(
-		ctx,
-		types.NamespacedName{
-			Name:      pod.Annotations[ipmanv1.AnnotationIpmanName],
-			Namespace: "",
-		},
-		ipsecconnection,
-	)
-	if err != nil {
-		return fmt.Errorf("Couldn't fetch ipsecconnection while reconciling pod: %w", err)
+	for _, x := range current {
+		_, exists := slices.BinarySearchFunc(desired, x, compareXfrms)
+		if !exists {
+			acts = append(acts, &DeletePodAction[XfrmPodSpec]{Pod: &x})
+		}
 	}
 
-	childName := pod.Annotations[ipmanv1.AnnotationChildName]
-	url := fmt.Sprintf("http://%s:8080/addEntry", ipsecconnection.Status.XfrmGatewayIPs[childName])
-	resp, err := comms.SendPost(url, comms.BridgeFdbRequest{
-		CiliumIp:    pod.Status.PodIP,
-		VxlanIp:     vxlanIp,
-		InterfaceId: ifid,
-	})
+	return acts
+}
 
-	if err != nil {
-		return fmt.Errorf("Couldn't send post request to add bridge fdb entry for pod: %w", err)
+func findNode(name string, s *ClusterState) (int, bool) {
+	for i, n := range s.Nodes {
+		if n.NodeName == name {
+			return i, true
+		}
+	}
+	return -1, false
+}
+
+func deleteNode(ns *NodeState) []Action {
+	acts := []Action{}
+	if ns.Charon != nil {
+		acts = append(acts, &DeletePodAction[CharonPodSpec]{Pod: ns.Charon})
+	}
+	if ns.Proxy != nil {
+		acts = append(acts, &DeletePodAction[ProxyPodSpec]{Pod: ns.Proxy})
+	}
+	for _, x := range ns.Xfrms {
+		acts = append(acts, &DeletePodAction[XfrmPodSpec]{Pod: &x})
 	}
 
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("Response status code from bridge fdb is not 200: %d", resp.StatusCode)
+	return acts
+}
+
+// DiffStates compares desired and current cluster states and returns actions needed to reconcile them
+func DiffStates(desired *ClusterState, current *ClusterState) []Action {
+	if reflect.DeepEqual(desired, current) {
+		return nil
+	}
+	acts := []Action{}
+	for _, ns := range desired.Nodes {
+		idx, found := findNode(ns.NodeName, current)
+		if !found {
+			fmt.Printf("Couldn't find node in current cluster state %s, skipping...\n", ns.NodeName)
+			continue
+		}
+
+		if !reflect.DeepEqual(ns, current.Nodes[idx]) {
+			acts = append(acts, diffCharon(ns.Charon, current.Nodes[idx].Charon)...)
+			acts = append(acts, diffProxy(ns.Proxy, current.Nodes[idx].Proxy)...)
+			acts = append(acts, diffXfrms(ns.Xfrms, current.Nodes[idx].Xfrms)...)
+		}
 	}
 
-	return nil
+	for _, cns := range current.Nodes {
+		_, found := findNode(cns.NodeName, desired)
+		// fmt.Println("Found node", cns.NodeName, found)
+		if !found {
+			// fmt.Println("Deleting all on node", cns.NodeName)
+			acts = append(acts, deleteNode(&cns)...)
+		}
+	}
+
+	return acts
 }
 
 func res(rq *time.Duration, times ...time.Duration) ctrl.Result {
-	if rq == nil {
+	if rq == nil && times == nil {
 		return ctrl.Result{}
+	}
+	if rq == nil {
+		return ctrl.Result{RequeueAfter: slices.Min(times)}
 	}
 
 	times = append(times, *rq)
@@ -296,151 +948,111 @@ func res(rq *time.Duration, times ...time.Duration) ctrl.Result {
 	return ctrl.Result{RequeueAfter: min}
 }
 
+func (r *IPSecConnectionReconciler) UpdateStatus(ctx context.Context) (*time.Duration, error) {
+	logger := log.FromContext(ctx)
+	list := ipmanv1.IPSecConnectionList{}
+	var rq *time.Duration
+	err := r.List(ctx, &list)
+	if err != nil {
+		logger.Error(err, "Couldn't fetch ipsec connection list to update status")
+		return nil, err
+	}
+	for _, ipsc := range list.Items {
+		rq2, err := r.updateIPSecConnectionStatus(&ipsc, ctx)
+		rq = rq2
+		if err != nil {
+			logger.Error(err, "Couldn't prepare update to ipsec connection status", "connection", ipsc.Name)
+			return rq, err
+		}
+		err = r.Status().Update(ctx, &ipsc)
+		if err != nil {
+			return rq, err
+		}
+	}
+	return rq, nil
+}
+
+// Reconcile implements the reconciliation loop for IPSecConnection resources
 func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-
-	var rq *time.Duration
-	iml := &ipmanv1.IPSecConnectionList{}
-	err := r.List(ctx, iml)
-	if err != nil {
-		logger.Error(err, "Error listing ipsecconnections")
-		return res(nil), err
-	}
-
-	for _, im := range iml.Items {
-		success := false
-		for !success {
-			success = true
-			ipsecconnection := &ipmanv1.IPSecConnection{}
-			err := r.Get(ctx, types.NamespacedName{
-				Namespace: im.Namespace,
-				Name:      im.Name,
-			}, ipsecconnection)
-			rq, err = r.updateIPSecConnectionStatus(ipsecconnection, ctx)
-			if err != nil {
-				logger.Info("Couldn't create free ip list to change status", err)
-				success = false
-			}
-			err = r.Status().Update(ctx, ipsecconnection)
-			if err != nil {
-				logger.Info("Couldn't update ipsecconnection status", err)
-				success = false
-			}
-		}
-	}
-
-	isIPSecConnection, err := r.isReconcilingKindIPSecConnection(ctx, req)
-	if err != nil {
-		logger.Error(err, "Error checking kind of reconciled object")
-		return res(rq), err
-	}
-
-	if isIPSecConnection {
-		logger.Info("Reconciling ipsecconnection")
-		err := r.reconcileIPSecConnection(ctx, req)
-		if err != nil {
-			return res(rq, time.Second*10), nil
-		}
-		return res(rq), nil
-	}
-
-	isPod, err := r.isReconcilingKindPod(ctx, req)
-	if err != nil {
-		logger.Error(err, "Couldn't check kind of reconciled object")
-		return res(rq), err
-	}
-	if isPod {
-		logger.Info("Reconciling pod")
-		err := r.reconcilePod(ctx, req)
-		if err != nil {
-			logger.Error(err, "Error reconciling pod")
-			return res(rq), err
-		}
-		return res(rq), nil
-	}
-
-	logger.Info("Reconciling deletion")
-	pods := &corev1.PodList{}
-	err = r.List(ctx, pods)
-	if err != nil {
-		return res(rq), fmt.Errorf("Error fetching list of pods when reconciling deletion: %w", err)
-	}
-	chlidrenNameList := []string{}
-	for _, im := range iml.Items {
-		for _, c := range im.Spec.Children {
-			chlidrenNameList = append(chlidrenNameList, c.Name)
-		}
-	}
-	// something deleted
-	if len(iml.Items) == 0 {
-		for _, p := range pods.Items {
-			if p.Namespace == r.Env.NamespaceName {
-				if val, ok := p.Annotations[ipmanv1.AnnotationChildName]; ok && val != "" {
-					err = r.Delete(ctx, &p)
-					if err != nil {
-						logger.Error(err, "Error deleting pod since there are no ipsecconnections", "podname", p.Name)
-					}
-				}
-
-				s := strings.Split(p.Name, "-")
-				rpn := strings.Split(ipmanv1.RestctlPodName, "-")
-				if s[0] == rpn[0] && s[1] == rpn[1] && p.Namespace == r.Env.NamespaceName {
-					err = r.Delete(ctx, &p)
-					if err != nil {
-						logger.Error(err, "Error deleting restctl pod since there are no ipmen", "podname", p.Name)
-					}
-				}
-
-				cpn := strings.Split(ipmanv1.CharonPodName, "-")
-				if s[0] == cpn[0] && s[1] == cpn[1] && p.Namespace == r.Env.NamespaceName {
-					err = r.Delete(ctx, &p)
-					if err != nil {
-						logger.Error(err, "Error deleting charon pod since there are no ipsecconnections", "podname", p.Name)
-					}
-				}
-
-			}
-		}
+	logger.Info("Starting reconciler loop")
+	pod := corev1.Pod{}
+	err := r.Get(ctx, req.NamespacedName, &pod)
+	if apierrors.IsNotFound(err) {
 	} else {
-		for _, p := range pods.Items {
-			if p.Namespace != r.Env.NamespaceName {
-				continue
-			}
-
-			annotation, ok := p.Annotations[ipmanv1.AnnotationChildName]
-			if ok && !slices.Contains(chlidrenNameList, annotation) {
-				err = r.Delete(ctx, &p)
-				if err != nil {
-					logger.Error(err, "Error deleting pod since there are no ipsecconnections", "podname", p.Name)
-				}
+		if err != nil {
+			logger.Error(err, "Error fetching pod")
+			return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil
+		} else {
+			if pod.Status.PodIP == "" {
+				logger.Info("Pod doesn't have ip yet")
+				return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil
 			}
 		}
 	}
+	rq, err := r.UpdateStatus(ctx)
+	ctr := 1
+	for apierrors.IsConflict(err) && ctr <= ipmanv1.UpdateStatusMaxRetries {
+		logger.Info("Error updating status, trying again", "tries", fmt.Sprintf("%d/%d", ctr, ipmanv1.UpdateStatusMaxRetries), "error", err)
+		rq, err = r.UpdateStatus(ctx)
+		ctr += 1
+	}
+
+	if ctr == ipmanv1.UpdateStatusMaxRetries {
+		logger.Info("Failed to update status after max tries", "max-tries", ipmanv1.UpdateStatusMaxRetries)
+		rq = nil
+	}
+	if err != nil {
+		logger.Error(err, "Error updating status")
+	}
+	currentState, err := r.GetClusterState(ctx)
+	if errors.Is(err, &RequestError{}) {
+		return res(rq, time.Duration(time.Second*3)), err
+	}
+
+	desiredState, err := r.CreateDesiredState(ctx)
+	if errors.Is(err, &RequestError{}) {
+		return res(rq, time.Duration(time.Second*3)), err
+	}
+
+	actions := DiffStates(desiredState, currentState)
+	actionTypes := []string{}
+	for _, a := range actions {
+		actionTypes = append(actionTypes, reflect.TypeOf(a).String())
+	}
+	logger.Info("Foundn action types", "types", actionTypes)
+	for idx, a := range actions {
+		logger.Info("Doing action", "type", reflect.TypeOf(a).String(), "num", fmt.Sprintf("%d/%d", idx+1, len(actions)))
+		err = a.Do(ctx, r)
+		if err != nil {
+			logger.Info("Error executing action", "action", a, "msg", err)
+		}
+	}
+
 	return res(rq), nil
 }
 
-func hasIpmanAnnotation(o client.Object) bool {
-	_, ok := o.GetAnnotations()[ipmanv1.AnnotationVxlanIp]
-	return ok
-}
-
+// SetupWithManager sets up the controller with the Manager
 func (r *IPSecConnectionReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	var annotationPredicate = predicate.Funcs{
+	podPredicate := predicate.Funcs{
 		CreateFunc: func(e event.CreateEvent) bool {
-			return hasIpmanAnnotation(e.Object)
+			_, ok := e.Object.GetAnnotations()[ipmanv1.AnnotationChildName]
+			return ok
 		},
 		UpdateFunc: func(e event.UpdateEvent) bool {
-			return hasIpmanAnnotation(e.ObjectNew)
+			return false
 		},
 		DeleteFunc: func(e event.DeleteEvent) bool {
-			return hasIpmanAnnotation(e.Object) && e.Object.GetNamespace() != r.Env.NamespaceName
+			_, ok := e.Object.GetAnnotations()[ipmanv1.AnnotationChildName]
+			return ok
 		},
 		GenericFunc: func(e event.GenericEvent) bool {
-			return hasIpmanAnnotation(e.Object)
+			return false
 		},
 	}
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&ipmanv1.IPSecConnection{}).
-		Watches(&corev1.Pod{}, &handler.EnqueueRequestForObject{}, builder.WithPredicates(annotationPredicate)).
+		WithEventFilter(predicate.GenerationChangedPredicate{}).
+		Watches(&corev1.Pod{}, &handler.EnqueueRequestForObject{}, builder.WithPredicates(podPredicate)).
 		Complete(r)
 }

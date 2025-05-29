@@ -3,175 +3,126 @@ package controller
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
-	"strings"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
-func (r *IPSecConnectionReconciler) xfrmPodNsn(childName, ipsecconnectionName string) types.NamespacedName {
-	ns := r.Env.NamespaceName
-	podNameEnv := ipmanv1.XfrmPodName
-	podName := strings.Join([]string{podNameEnv, childName, ipsecconnectionName}, "-")
-
-	return types.NamespacedName{
-		Namespace: ns,
-		Name:      podName,
-	}
+// XfrmPodSpec defines the specification for an Xfrm pod
+type XfrmPodSpec struct {
+	Routes Routes         `json:"routes" diff:"routes"`
+	Props  XfrmProperties `json:"properties" diff:"properties"`
 }
 
-func (r *IPSecConnectionReconciler) ensureXfrmPod(ipsecconnection *ipmanv1.IPSecConnection, ctx context.Context, c *ipmanv1.Child) (*corev1.Pod, error) {
-	logger := log.FromContext(ctx)
-
-	xfrmPod := &corev1.Pod{}
-
-	err := r.Get(ctx, r.xfrmPodNsn(c.Name, ipsecconnection.Name), xfrmPod)
-	xfrmUrl := ""
-	if apierrors.IsNotFound(err) {
-
-		xfrmPod = r.createXfrmPod(c, ipsecconnection)
-		if err := r.Create(ctx, xfrmPod); err != nil {
-			logger.Error(err, "Failed to create xfrm pod")
-			return nil, err
-		}
-
-		xfrmPod, err = waitForPodReady(xfrmPod, r.xfrmPodNsn(c.Name, ipsecconnection.Spec.Name), r.Get)
-		if err != nil {
-			logger.Error(err, "Error waiting for xfrm pod to be ready", "pod", xfrmPod.Name)
-			return nil, err
-		}
-
-		resp, err := http.Get(fmt.Sprintf("http://%s:8080/pid", xfrmPod.Status.PodIP))
-		if err != nil {
-			logger.Error(err, "Couldn't request PID from xfrm pod", ipmanv1.XfrmPodName, xfrmPod.Name)
-			return nil, err
-		}
-		defer resp.Body.Close()
-		out, err := io.ReadAll(resp.Body)
-		if err != nil {
-			logger.Error(err, "Couldn't read body of pid response", ipmanv1.XfrmPodName, xfrmPod.Name)
-			return nil, err
-		}
-
-		prd := &comms.PidResponseData{}
-		err = json.Unmarshal(out, prd)
-		if err != nil {
-			logger.Error(err, "Couldn't unmarshal body of pid response", ipmanv1.XfrmPodName, xfrmPod.Name)
-			return nil, err
-		}
-
-		if prd.Error != "" {
-			err = fmt.Errorf("%s", prd.Error)
-			logger.Error(err, "Error in PID response from xfrm pod")
-			return nil, err
-		}
-
-		xfrmRequest := comms.XfrmRequestData{
-			XfrmIfId: c.XfrmIfId,
-			PID:      prd.Pid,
-		}
-
-		charonUrl := fmt.Sprintf("http://%s", ipsecconnection.Status.CharonProxyIP)
-		resp, err = comms.SendPost(charonUrl+"/xfrm", xfrmRequest)
-
-		if err != nil {
-			logger.Error(err, "Couldn't send request for xfrm interface")
-			return nil, err
-		}
-
-		defer resp.Body.Close()
-		out, err = io.ReadAll(resp.Body)
-		if err != nil {
-			logger.Error(err, "Couldn't read body of request for xfrm interface")
-			return nil, err
-		}
-
-		rd := &comms.XfrmResponseData{}
-		err = json.Unmarshal(out, rd)
-		if err != nil {
-			logger.Error(err, "Couldn't unmarshal body of response to request for xfrm interface", "body", string(out))
-			return nil, err
-		}
-		if rd.Error != "" {
-			err = fmt.Errorf("%s", rd.Error)
-			logger.Error(err, "Error moving interface to xfrm pod in charon-pod")
-			return nil, err
-		}
-
-		xfrmUrl = fmt.Sprintf("http://%s:8080", xfrmPod.Status.PodIP)
-		resp, err = comms.SendPost(xfrmUrl+"/addRoutes", c)
-		if err != nil {
-			logger.Error(err, "Error sending post to /addRoutes in xfrm pod", "child", c, "pod", xfrmPod)
-			return nil, err
-		}
-		if resp.StatusCode != 200 {
-			err = errors.New("status code not 200")
-			logger.Error(err, "Error requesting /addRoutes in xfrm pod", "status", resp.StatusCode, "pod", xfrmPod)
-			return nil, err
-		}
-
-		return xfrmPod, nil
-	} else if err != nil {
-		logger.Error(err, "Error checking xfrm pod existence")
-		return nil, err
-	}
-
-	return xfrmPod, nil
-
-}
-
-func (r *IPSecConnectionReconciler) createXfrmPod(c *ipmanv1.Child, ipsecconnection *ipmanv1.IPSecConnection) *corev1.Pod {
-	remoteIpsJSON, _ := json.Marshal(c.RemoteIps)
-	return &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, ipsecconnection.Spec.Name}, "-"),
-			Namespace: r.Env.NamespaceName,
-			Labels: map[string]string{
-				ipmanv1.XfrmPodLabelKey: ipsecconnection.Spec.Name,
-			},
-			OwnerReferences: []metav1.OwnerReference{createOwnerReference(ipsecconnection)},
-			Annotations: map[string]string{
-				ipmanv1.AnnotationIpmanName:  ipsecconnection.Spec.Name,
-				ipmanv1.AnnotationChildName:  c.Name,
-				ipmanv1.AnnotationVxlanIp:    c.VxlanIP,
-				ipmanv1.AnnotationXfrmIp:     c.XfrmIP,
-				ipmanv1.AnnotationRemoteIps:  string(remoteIpsJSON),
-				ipmanv1.AnnotationIntefaceId: strconv.FormatInt(int64(c.XfrmIfId), 10),
-			},
-		},
-		Spec: corev1.PodSpec{
-			NodeSelector: map[string]string{
-				"kubernetes.io/hostname": ipsecconnection.Spec.NodeName,
-			},
-			RestartPolicy: corev1.RestartPolicyNever,
-			HostPID:       true,
-			Containers: []corev1.Container{
-				{
-					Name:            ipmanv1.XfrminionContainerName,
-					Image:           r.Env.XfrminionImage,
-					ImagePullPolicy: corev1.PullAlways,
-					SecurityContext: r.createNetAdminSecurityContext(),
-					LivenessProbe: &corev1.Probe{
-						ProbeHandler: corev1.ProbeHandler{
-							HTTPGet: &corev1.HTTPGetAction{
-								Path: "/healthz",
-								Port: intstr.FromInt(8080),
-							},
-						},
+// ApplySpec implements the IpmanPodSpec interface for XfrmPodSpec
+func (s XfrmPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
+	p.Spec.Containers = []corev1.Container{
+		{
+			Name:            ipmanv1.XfrminionContainerName,
+			Image:           e.XfrminionImage,
+			ImagePullPolicy: corev1.PullPolicy(e.XfrminionPullPolicy),
+			SecurityContext: &corev1.SecurityContext{
+				Capabilities: &corev1.Capabilities{
+					Add: []corev1.Capability{
+						"NET_ADMIN",
 					},
 				},
 			},
 		},
 	}
+	p.Spec.RestartPolicy = corev1.RestartPolicyNever
+	p.Spec.HostPID = true
+}
+
+func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+	ctx := context.Background()
+	nsn := types.NamespacedName{Name: s.Props.OwnerConnection, Namespace: ""}
+	isc := &ipmanv1.IPSecConnection{}
+	err := r.Get(ctx, nsn, isc)
+	if err != nil {
+		return fmt.Errorf("Couldn't get ipsec connection for pod '%s': %w", pod.Name, err)
+	}
+
+	for pod.Status.PodIP == "" {
+		pod, err = r.waitForPodReady(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
+		if err != nil {
+			return err
+		}
+	}
+	url := fmt.Sprintf("http://%s:8080", pod.Status.PodIP)
+	resp, err := http.Get(url + "/pid")
+	if err != nil {
+		return fmt.Errorf("Couldn't get xfrm pods '%s' PID: %w", pod.Name, err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Couldn't get xfrm pods '%s' PID: Status code not 200, is %d", pod.Name, resp.StatusCode)
+	}
+	defer resp.Body.Close()
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("Couldn't read body of response for xfrm '%s' PID: %w", pod.Name, err)
+	}
+	prd := &comms.PidResponseData{}
+	err = json.Unmarshal(out, prd)
+	if err != nil {
+		return fmt.Errorf("Couldn't unmarshal response for xfrm '%s' PID: %w", pod.Name, err)
+	}
+
+	xfrmRequest := &comms.XfrmRequestData{
+		XfrmIfId: int(s.Props.InterfaceID),
+		PID:      prd.Pid,
+	}
+	charonUrl := fmt.Sprintf("http://%s/xfrm", isc.Status.CharonProxyIP)
+	resp, err = comms.SendPost(charonUrl, xfrmRequest)
+	if err != nil {
+		return fmt.Errorf("Couldn't create xfrm interface for pod '%s':  %w", pod.Name, err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Couldn't create xfrm interface for pod '%s' PID: Status code not 200, is %d (IP: %s)", pod.Name, resp.StatusCode, isc.Status.CharonProxyIP)
+	}
+
+	resp, err = comms.SendPost(url+"/setupVxlan", comms.SetupVxlanRequest{
+		XfrmIP:  s.Props.XfrmIP,
+		VxlanIP: s.Props.VxlanIP,
+		XfrmID:  int(s.Props.InterfaceID),
+	})
+	if err != nil {
+		return fmt.Errorf("Couldn't create vxlan interface for pod '%s':  %w", pod.Name, err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Couldn't create vxlan interface for pod '%s' PID: Status code not 200, is %d (IP: %s)", pod.Name, resp.StatusCode, isc.Status.CharonProxyIP)
+	}
+
+	if isc.Status.XfrmGatewayIPs == nil {
+		isc.Status.XfrmGatewayIPs = map[string]string{}
+	}
+	isc.Status.XfrmGatewayIPs[s.Props.OwnerChild] = pod.Status.PodIP
+	r.Status().Update(ctx, isc)
+	return nil
+}
+func (s XfrmPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+	ctx := context.Background()
+	nsn := types.NamespacedName{Name: s.Props.OwnerConnection, Namespace: ""}
+	isc := &ipmanv1.IPSecConnection{}
+	err := r.Get(ctx, nsn, isc)
+	if err != nil {
+		return fmt.Errorf("Couldn't get ipsec connection for pod '%s': %w", pod.Name, err)
+	}
+	delete(isc.Status.XfrmGatewayIPs, s.Props.OwnerChild)
+	r.Status().Update(ctx, isc)
+	return nil
+}
+
+// XfrmProperties holds the configuration properties for an Xfrm pod
+type XfrmProperties struct {
+	OwnerChild      string `json:"owner_child" diff:"owner_child"`
+	OwnerConnection string `json:"owner_connection" diff:"owner_connection"`
+	InterfaceID     uint32 `json:"interface_id" diff:"interface_id"`
+	XfrmIP          string `json:"xfrm_ip" diff:"xfrm_ip"`
+	VxlanIP         string `json:"vxlan_ip" diff:"vxlan_ip"`
 }

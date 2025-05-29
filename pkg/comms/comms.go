@@ -9,9 +9,14 @@ import (
 )
 
 type BridgeFdbRequest struct {
-	CiliumIp    string `json:"cilium_ip"`
-	VxlanIp     string `json:"vxlan_ip"`
+	CiliumIP    string `json:"cilium_ip"`
 	InterfaceId string `json:"interface_id"`
+}
+type LocalRouteRequest struct {
+	VxlanIP string `json:"vxlan_ip"`
+}
+type RemoteRouteRequest struct {
+	RemoteIP string `json:"remote_ip"`
 }
 
 type XfrmRequestData struct {
@@ -84,4 +89,10 @@ func SendPost[T any](url string, data T) (*http.Response, error) {
 	}
 
 	return resp, nil
+}
+
+type SetupVxlanRequest struct {
+	XfrmIP  string `json:"xfrm_ip"`
+	XfrmID  int    `json:"xfrm_id"`
+	VxlanIP string `json:"vxlan_ip"`
 }

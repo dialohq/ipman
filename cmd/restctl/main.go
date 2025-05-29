@@ -242,10 +242,11 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
+	logger.Info("Reloading config")
 
 	dataBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Error(err.Error(), "Error reading body of request for reload")
+		logger.Error("Error reading body of request for reload", "msg", err.Error())
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode("Bad Request")
 		return
@@ -260,9 +261,10 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	logger.Info("Writing to file", "file", SWANCTL_CONF_PATH, "data", data.SerializedConfig)
 	err = os.WriteFile(SWANCTL_CONF_PATH, []byte(data.SerializedConfig), 0644)
 	if err != nil {
-		logger.Error(err.Error(), "Error writing data of request for reload to file")
+		logger.Error("Error writing data of request for reload to file", "err", err.Error())
 		w.WriteHeader(400)
 		json.NewEncoder(w).Encode("Bad Request")
 		return

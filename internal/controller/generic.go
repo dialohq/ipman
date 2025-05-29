@@ -2,16 +2,15 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"time"
+
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-
-	"log/slog"
-	"os"
-	"sigs.k8s.io/controller-runtime/pkg/client"
-	"time"
+	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 func createOwnerReference(ipsecconnection *ipmanv1.IPSecConnection) metav1.OwnerReference {
@@ -25,61 +24,77 @@ func createOwnerReference(ipsecconnection *ipmanv1.IPSecConnection) metav1.Owner
 	}
 }
 
-// rke2 requires seccomp profile set to runtime default or localhost
-func (r *IPSecConnectionReconciler) createDefaultSecurityContext() *corev1.SecurityContext {
-	// TODO: figure out exactly which
-	// container require what and make
-	// this more specific. charon pod
-	// needs to run as root to load
-	// plugins
-	privEsc := false
-	return &corev1.SecurityContext{
-		SeccompProfile: &corev1.SeccompProfile{
-			Type: corev1.SeccompProfileTypeRuntimeDefault,
-		},
-
-		AllowPrivilegeEscalation: &privEsc,
-		Capabilities: &corev1.Capabilities{
-			Add: []corev1.Capability{"NET_ADMIN", "NET_RAW"},
-		},
-	}
-}
-
-func (r *IPSecConnectionReconciler) createCharonDaemonSecurityContext() *corev1.SecurityContext {
-	def := r.createDefaultSecurityContext()
-	def.Capabilities.Add = []corev1.Capability{"NET_ADMIN", "NET_RAW", "NET_BIND_SERVICE"}
-	return def
-
-}
-
-func (r *IPSecConnectionReconciler) createNetAdminSecurityContext() *corev1.SecurityContext {
-	def := r.createDefaultSecurityContext()
-	return def
-}
-
-func waitForPodReady(pod *corev1.Pod,
-	nsn types.NamespacedName,
-	get func(context.Context, client.ObjectKey, client.Object, ...client.GetOption) error) (*corev1.Pod, error) {
-
+// waitForPodReady waits for a pod to be in Running state and have an assigned IP
+func (r *IPSecConnectionReconciler) waitForPodReady(nsn types.NamespacedName) (*corev1.Pod, error) {
 	ctx := context.Background()
-	h := slog.NewJSONHandler(os.Stdout, nil)
-	logger := slog.New(h)
-
+	logger := log.FromContext(ctx, "awaited-pod", nsn.String())
+	pod := &corev1.Pod{}
+	err := r.Get(ctx, nsn, pod)
+	tries := 1
+	if err != nil {
+		logger.Info(
+			"Error waiting for pod to go into 'Running' state",
+			"error", err,
+			"tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries),
+		)
+		tries += 1
+	}
 	for pod.Status.Phase != "Running" {
-		err := get(ctx, nsn, pod)
+		if tries > ipmanv1.WaitForPodReadyMaxRetries {
+			return nil, fmt.Errorf("Timeout waiting for pod to go into state 'Running' after %d tries", ipmanv1.WaitForPodReadyMaxRetries)
+		}
+		err := r.Get(ctx, nsn, pod)
 		if err != nil {
-			logger.Error("Error fetching charon pod while checking for container readiness", "msg", err, "pod", pod.Name)
+			logger.Info(
+				"Error waiting for pod to go into 'Running' state",
+				"error", err,
+				"tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries),
+			)
+		} else {
+			logger.Info("Waiting", "phase", pod.Status.Phase, "tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries))
 		}
 		time.Sleep(1 * time.Second)
+		tries++
 	}
 
+	tries = 1
 	for pod.Status.PodIP == "" {
-		err := get(ctx, nsn, pod)
-		if err != nil && !apierrors.IsNotFound(err) {
-			logger.Error("Error fetching charon pod while waiting for ip allocation", "msg", err)
-			return nil, err
+		if tries > ipmanv1.WaitForPodReadyMaxRetries {
+			return nil, fmt.Errorf("Timeout waiting for pod to get assigned IP after %d tries", ipmanv1.WaitForPodReadyMaxRetries)
+		}
+		err := r.Get(ctx, nsn, pod)
+		if err != nil {
+			logger.Info(
+				"Error waiting for pod to get assigned ip",
+				"error", err,
+				"tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries),
+			)
+		} else {
+			logger.Info("Waiting", "phase", pod.Status.Phase, "tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries))
 		}
 		time.Sleep(1 * time.Second)
+		tries++
 	}
 	return pod, nil
+}
+
+// DeletePod deletes a pod with retry logic
+func (r *IPSecConnectionReconciler) DeletePod(p *corev1.Pod) error {
+	ctx := context.Background()
+	logger := log.FromContext(ctx)
+	nsn := types.NamespacedName{
+		Name:      p.Name,
+		Namespace: p.Namespace,
+	}
+	tries := 1
+	for {
+		if tries > ipmanv1.DeletePodMaxRetries {
+			return fmt.Errorf("Error deleting pod after %d tries", ipmanv1.DeletePodMaxRetries)
+		}
+		err := r.Delete(ctx, p)
+		if err != nil && !apierrors.IsNotFound(err) {
+			logger.Error(err, "Error deleting pod", "pod", nsn.String(), "tries", fmt.Sprintf("%d/%d", tries, ipmanv1.DeletePodMaxRetries))
+		}
+		tries++
+	}
 }

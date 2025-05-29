@@ -46,10 +46,20 @@ spec:
               value: {{ .Values.restctl.image }}
             - name: CHARONDAEMON_IMAGE
               value: {{ .Values.charon.image }}
+            - name: CADDY_IMAGE
+              value: {{ .Values.caddy.image }}
             - name: PROXY_SOCKET_PATH
               value: {{ .Values.global.socketPath }}
             - name: HOST_SOCKETS_PATH
               value: {{ .Values.global.socketPath }}
+            - name: XFRMINION_PULL_POLICY
+              value: {{ .Values.xfrminion.pullPolicy }}
+            - name: CHARON_PULL_POLICY
+              value: {{ .Values.charon.pullPolicy }}
+            - name: RESTCTL_PULL_POLICY
+              value: {{ .Values.restctl.pullPolicy }}
+            - name: PROXY_PULL_POLICY
+              value: {{ .Values.caddy.pullPolicy }}
 
           volumeMounts:
           - name: {{ .Values.webhook.volumes.name }}

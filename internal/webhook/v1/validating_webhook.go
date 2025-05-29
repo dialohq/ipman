@@ -208,7 +208,7 @@ func validateIPSecConnectionUpdate(new ipmanv1.IPSecConnection, old ipmanv1.IPSe
 				violatingPod := corev1.Pod{}
 				if slices.ContainsFunc(deletedIps, func(ip string) bool {
 					return slices.ContainsFunc(pods, func(pod corev1.Pod) bool {
-						if pod.Annotations[ipmanv1.AnnotationVxlanIp] == ip {
+						if pod.Annotations[ipmanv1.AnnotationVxlanIP] == ip {
 							violatingPod = pod
 							return true
 						}
@@ -235,7 +235,7 @@ func validateIPSecConnectionUpdate(new ipmanv1.IPSecConnection, old ipmanv1.IPSe
 					return false, fmt.Errorf("Error parsing local ip to subnet(%s): %w", ip, err)
 				}
 				for _, p := range pods {
-					podIp, ok := p.Annotations[ipmanv1.AnnotationVxlanIp]
+					podIp, ok := p.Annotations[ipmanv1.AnnotationVxlanIP]
 					if !ok {
 						continue
 					}

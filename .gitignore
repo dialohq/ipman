@@ -2,4 +2,7 @@ certs
 samples
 result
 kubeconfig
-ipman/ipman-*.tgz
+helm/ipman-*.tgz
+.github/workflows/.secrets
+
+**/.claude/settings.local.json
