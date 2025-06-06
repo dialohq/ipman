@@ -15,7 +15,6 @@ import (
 // ProxyPodSpec defines the specification for a Proxy pod
 type ProxyPodSpec struct {
 	HostPath string `json:"host_path" diff:"host_path"`
-	// NodeName string `json:"node"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for ProxyPodSpec

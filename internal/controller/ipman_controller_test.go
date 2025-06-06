@@ -127,8 +127,11 @@ func TestCreatingDesiredState(t *testing.T) {
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
-							// TODO: fill those once we populate them in controller
-							Routes: Routes{},
+							Routes: Routes{
+								Local:     []string{"10.0.2.0/24"},
+								Remote:    []string{"10.0.1.0/24"},
+								BridgeFDB: LocalRoutes{},
+							},
 							Props: XfrmProperties{
 								OwnerChild:      "3s",
 								OwnerConnection: "sodies-nix",
@@ -147,7 +150,11 @@ func TestCreatingDesiredState(t *testing.T) {
 						},
 						Spec: XfrmPodSpec{
 							// TODO: fill those once we populate them in controller
-							Routes: Routes{},
+							Routes: Routes{
+								Local:     []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
+								Remote:    []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
+								BridgeFDB: LocalRoutes{},
+							},
 							Props: XfrmProperties{
 								OwnerChild:      "4s",
 								OwnerConnection: "sodies-nix",
@@ -310,9 +317,9 @@ func TestDiffStates(t *testing.T) {
 
 	// This test is expected to fail with the current implementation, but shows what we expect
 	// in the future once DeletePodAction is properly implemented
-	t.Run("Future: Delete pod when not in desired state", func(t *testing.T) {
+	t.Run("Delete pod when not in desired state", func(t *testing.T) {
 		// Skip this test for now as it's for future functionality
-		t.Skip("DeletePodAction not fully implemented yet")
+		// t.Skip("DeletePodAction not fully implemented yet")
 
 		actions = DiffStates(emptyDesired, currentWithCharon)
 		if len(actions) != 1 {
@@ -377,10 +384,10 @@ func TestDiffStates(t *testing.T) {
 	// in the future once UpdatePodAction is properly implemented
 	t.Run("Future: Update pod when specs differ", func(t *testing.T) {
 		// Skip this test for now as it's for future functionality
-		t.Skip("UpdatePodAction not implemented yet")
+		// t.Skip("UpdatePodAction not implemented yet")
 
 		actions = DiffStates(desiredWithCharonNewSpec, currentWithCharonOldSpec)
-		if len(actions) != 1 {
+		if len(actions) != 2 {
 			t.Errorf("Expected 1 update action, got %d actions", len(actions))
 		}
 

@@ -110,10 +110,6 @@ type VxlanIP = string
 type UnderlyingIP = string
 type LocalRoutes map[VxlanIP]UnderlyingIP
 
-// 	VxlanIP      string `json:"vxlan_ip" diff:"vxlan_ip"`
-// 	UnderlyingIP string `json:"underlying_ip" diff:"underlying_ip"`
-// }
-
 type WorkerPodSpec struct {
 	Routes          []Route `json:"routes" diff:"routes"`
 	OwnerConnection string  `json:"owner_connection" diff:"owner_connection"`

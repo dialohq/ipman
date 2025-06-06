@@ -51,6 +51,7 @@ func main() {
 		XfrminionPullPolicy:    os.Getenv("XFRMINION_PULL_POLICY"),
 		CharonDaemonPullPolicy: os.Getenv("CHARON_PULL_POLICY"),
 		CaddyProxyPullPolicy:   os.Getenv("PROXY_PULL_POLICY"),
+		IsTest:                 false,
 	}
 
 	logger.Info("Creating controller")

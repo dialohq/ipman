@@ -43,6 +43,7 @@ type Envs struct {
 	RestctlPullPolicy      string
 	CaddyImage             string
 	CaddyProxyPullPolicy   string
+	IsTest                 bool
 }
 
 // IPSecConnectionReconciler reconciles IPSecConnection resources
@@ -181,8 +182,6 @@ func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 	specJSON := p.Annotations[ipmanv1.AnnotationSpec]
 	spec := &XfrmPodSpec{}
 	_ = json.Unmarshal([]byte(specJSON), spec)
-	logger := log.FromContext(context.Background())
-	logger.Info("Xfrm from pod", "ip", p.Status.PodIP)
 
 	return IpmanPod[XfrmPodSpec]{
 		Meta: PodMeta{
@@ -289,8 +288,6 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 	if err != nil {
 		return nil, err
 	}
-	logger := log.FromContext(ctx)
-	logger.Info("xfrms in get cluster state", "xfrms", xfrms)
 
 	sortPods(xfrms)
 
@@ -487,14 +484,6 @@ func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []
 		logger.Error(err, "Couldn't fetch workers")
 		return nil
 	}
-	for _, w1 := range workers {
-		for _, w2 := range w1 {
-			for _, w3 := range w2 {
-				logger.Info("worker names", "name", w3.Meta.Name, "namespace", w3.Meta.Namespace, "child", w3.Spec.OwnerChild)
-			}
-		}
-	}
-	logger.Info("Fetched workers while creating xfrms", "workers", len(workers))
 	for _, conn := range cl {
 		for _, c := range conn.Spec.Children {
 			ws := workers[conn.Name][c.Name]
@@ -544,7 +533,6 @@ func (r *IPSecConnectionReconciler) CreateNodes(ctx context.Context) ([]NodeStat
 }
 
 func (r *IPSecConnectionReconciler) CreateWorkers(ctx context.Context) (map[string]map[string][]Worker, error) {
-	logger := log.FromContext(ctx)
 	ps := &corev1.PodList{}
 	sel := labels.NewSelector()
 	req, err := labels.NewRequirement(ipmanv1.LabelWorker, selection.Exists, nil)
@@ -557,7 +545,6 @@ func (r *IPSecConnectionReconciler) CreateWorkers(ctx context.Context) (map[stri
 	if err != nil {
 		return nil, err
 	}
-	logger.Info("Listed workers", "list", len(ps.Items))
 	// structure:
 	// 	connection1:
 	// 		child1:
@@ -646,13 +633,11 @@ func recreatePod[S IpmanPodSpec](old, new *IpmanPod[S]) []Action {
 }
 
 func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
-	logger := log.FromContext(context.Background())
 	acts := []Action{}
 	clr := current.Spec.Routes.Local
 	dlr := desired.Spec.Routes.Local
 	slices.Sort(clr)
 	slices.Sort(dlr)
-	logger.Info("Diffing local routes", "current", clr, "desired", clr)
 	if !reflect.DeepEqual(clr, dlr) {
 		cl, _ := diff.Diff(clr, dlr)
 		for _, change := range cl {
@@ -703,7 +688,6 @@ func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
 	drr := desired.Spec.Routes.Remote
 	slices.Sort(crr)
 	slices.Sort(drr)
-	logger.Info("Diffing remote routes", "current", crr, "desired", crr)
 	if !reflect.DeepEqual(crr, drr) {
 		cl, _ := diff.Diff(crr, drr)
 		for _, change := range cl {
@@ -752,11 +736,9 @@ func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
 
 	cfdb := current.Spec.Routes.BridgeFDB
 	dfdb := desired.Spec.Routes.BridgeFDB
-	logger.Info("comparing desired and current bfdbs", "desired", dfdb, "currnet", cfdb)
 	if !reflect.DeepEqual(cfdb, dfdb) {
 		cl, _ := diff.Diff(cfdb, dfdb)
 		for _, c := range cl {
-			logger.Info("Found a change in BFDB", "chagne", c)
 			switch c.Type {
 			case "update":
 				if c.To == nil {
@@ -783,7 +765,6 @@ func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
 					acts = append(acts, &DeleteBridgeFDBAction{UnderlyingIP: valFrom, Pod: current, VxlanIP: c.Path[0]}, &AddBridgeFDBAction{UnderlyingIP: valTo, Pod: current, VxlanIP: c.Path[0]})
 				}
 			case "create":
-				logger.Info("Case create")
 				val, ok := c.To.(string)
 				if !ok {
 					return nil, fmt.Errorf("desired value is not a string: %+v", c)
@@ -791,7 +772,6 @@ func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
 					acts = append(acts, &AddBridgeFDBAction{UnderlyingIP: val, VxlanIP: c.Path[0], Pod: current})
 				}
 			case "delete":
-				logger.Info("Case delete")
 				val, ok := c.From.(string)
 				if !ok {
 					return nil, fmt.Errorf("desired value is not a string: %+v", c)
@@ -803,7 +783,6 @@ func diffRoutes(current, desired IpmanPod[XfrmPodSpec]) ([]Action, error) {
 			}
 		}
 	}
-	logger.Info("Final actions after diffing routes", "actions", acts)
 	return acts, nil
 }
 
@@ -924,9 +903,7 @@ func DiffStates(desired *ClusterState, current *ClusterState) []Action {
 
 	for _, cns := range current.Nodes {
 		_, found := findNode(cns.NodeName, desired)
-		// fmt.Println("Found node", cns.NodeName, found)
 		if !found {
-			// fmt.Println("Deleting all on node", cns.NodeName)
 			acts = append(acts, deleteNode(&cns)...)
 		}
 	}
@@ -985,7 +962,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 			return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil
 		} else {
 			if pod.Status.PodIP == "" {
-				logger.Info("Pod doesn't have ip yet")
+				logger.Info("Pod doesn't have ip yet, requeuing...")
 				return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil
 			}
 		}
@@ -1020,9 +997,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 	for _, a := range actions {
 		actionTypes = append(actionTypes, reflect.TypeOf(a).String())
 	}
-	logger.Info("Foundn action types", "types", actionTypes)
-	for idx, a := range actions {
-		logger.Info("Doing action", "type", reflect.TypeOf(a).String(), "num", fmt.Sprintf("%d/%d", idx+1, len(actions)))
+	for _, a := range actions {
 		err = a.Do(ctx, r)
 		if err != nil {
 			logger.Info("Error executing action", "action", a, "msg", err)

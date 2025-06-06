@@ -792,7 +792,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 					},
 				}
 			},
-			expectedActions: 4, // Delete and create Charon pod, create Restctl pod, delete Proxy pod
+			expectedActions: 3, // Delete and create Charon pod, delete Proxy pod
 		},
 	}
 

@@ -12,8 +12,6 @@ import (
 	"github.com/r3labs/diff/v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"sigs.k8s.io/controller-runtime/pkg/log"
-	// "sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // Action is an interface for reconciliation actions that can be performed
@@ -142,7 +140,6 @@ func (a *AddLocalRouteAction) Do(ctx context.Context, r *IPSecConnectionReconcil
 	}
 	a.Pod.Meta.IP = pod.Status.PodIP
 	url := fmt.Sprintf("http://%s:8080/addLocalRoute", a.Pod.Meta.IP)
-	// logger.Info("URL", "url", url)
 	resp, err := comms.SendPost(url, comms.LocalRouteRequest{VxlanIP: a.Route})
 	if err != nil {
 		return fmt.Errorf("Couldn't send post to add local route: %w", err)
@@ -170,7 +167,6 @@ func (a *DeleteLocalRouteAction) Do(ctx context.Context, r *IPSecConnectionRecon
 	}
 	a.Pod.Meta.IP = pod.Status.PodIP
 	url := fmt.Sprintf("http://%s:8080/deleteLocalRoute", a.Pod.Meta.IP)
-	// logger.Info("URL", "url", url)
 	resp, err := comms.SendPost(url, comms.LocalRouteRequest{VxlanIP: a.Route})
 	if err != nil {
 		return fmt.Errorf("Couldn't send post to delete local route: %w", err)
@@ -218,8 +214,6 @@ func updateXfrmSpecAnnotation(x IpmanPod[XfrmPodSpec], r *IPSecConnectionReconci
 	if err != nil {
 		return err
 	}
-	logger := log.FromContext(context.TODO())
-	// logger.Info("update spec", "annotations", p.Annotations)
 	p.Annotations[ipmanv1.AnnotationSpec] = string(specJSON)
 	err = r.Update(context.Background(), p)
 	if err != nil {
@@ -236,21 +230,13 @@ func updateXfrmSpecAnnotation(x IpmanPod[XfrmPodSpec], r *IPSecConnectionReconci
 		if err != nil {
 			return err
 		}
-		// cl, _ := diff.Diff(spc, s.Spec)
-		// for _, c := range cl {
-		// 	logger.Info("Change", "change", c)
-		// }
-		// logger.Info("Those checking equality", "spc", spc, "s.Spec", x.Spec)
 		cl, _ := diff.Diff(*spc, x.Spec)
 		if len(cl) == 0 {
-			// logger.Info("Equal")
 			done = true
 			break
 		}
-		logger.Info("Waiting for update to take effect")
 		time.Sleep(1 * time.Second)
 	}
-	// logger.Info("after spec update", "annotations", p.Annotations)
 	return err
 }
 
