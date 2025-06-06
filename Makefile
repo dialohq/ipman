@@ -72,17 +72,17 @@ clean:
 		-f namespace.yaml || true
 
 vxlandlord:
-	docker build -t plan9better/vxlandlord:0.1.0 --platform linux/arm64 --file ./vxlandlord.Dockerfile .
-	docker push plan9better/vxlandlord:0.1.0 
+	docker build -t plan9better/vxlandlord:0.1.1 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
+	docker push plan9better/vxlandlord:0.1.1 
 xfrminion:
-	docker build -t plan9better/xfrminion:0.1.0 --platform linux/arm64 --file ./xfrminion.Dockerfile .
-	docker push plan9better/xfrminion:0.1.0 
+	docker build -t plan9better/xfrminion:0.1.1 --platform linux/amd64 --file ./xfrminion.Dockerfile .
+	docker push plan9better/xfrminion:0.1.1 
 restctl:
-	docker build -t plan9better/restctl:0.1.0 --platform linux/arm64 --file ./restctl.Dockerfile .
-	docker push plan9better/restctl:0.1.0
+	docker build -t plan9better/restctl:0.1.1 --platform linux/amd64 --file ./restctl.Dockerfile .
+	docker push plan9better/restctl:0.1.1
 operator:
-	docker build -t plan9better/operator:0.1.0 --platform linux/arm64 --file ./operator.Dockerfile .
-	docker push plan9better/operator:0.1.0 
+	docker build -t plan9better/operator:0.1.1 --platform linux/amd64 --file ./operator.Dockerfile .
+	docker push plan9better/operator:0.1.1 
 charon:
-	docker build -t plan9better/charon:0.1.0 --platform linux/arm64 --file ./charon.Dockerfile .
-	docker push plan9better/charon:0.1.0 
+	docker build -t plan9better/charon:0.1.1 --platform linux/amd64 --file ./charon.Dockerfile .
+	docker push plan9better/charon:0.1.1 
