@@ -15,6 +15,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	"github.com/kr/pretty"
+	"github.com/r3labs/diff/v3"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
@@ -46,7 +47,7 @@ var (
 					RemoteIps: []string{"10.0.1.0/24"},
 					XfrmIP:    "10.0.2.1/24",
 					VxlanIP:   "10.0.2.2/24",
-					XfrmIfId:  102,
+					XfrmIfId:  101,
 					IpPools: map[string][]string{
 						"primary":   {"10.0.2.3/24", "10.0.2.4/24", "10.0.2.5/24", "10.0.2.6/24"},
 						"secondary": {"10.0.2.7/24", "10.0.2.8/24", "10.0.2.9/24", "10.0.2.10/24"},
@@ -61,7 +62,7 @@ var (
 					RemoteIps: []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
 					XfrmIP:    "10.0.9.1/32",
 					VxlanIP:   "10.0.8.2/32",
-					XfrmIfId:  202,
+					XfrmIfId:  201,
 					IpPools: map[string][]string{
 						"worker":  {"10.0.9.8/32", "10.0.2.9/32"},
 						"manager": {"10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32", "10.0.4.4/32"},
@@ -69,6 +70,57 @@ var (
 				},
 			},
 			NodeName: "localcluster",
+		},
+	}
+	c2 = ipmanv1.IPSecConnection{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "sodies-nix2",
+			Namespace: "ipman-system",
+		},
+		Spec: ipmanv1.IPSecConnectionSpec{
+			Name:       "5s",
+			RemoteAddr: "13.51.6.188",
+			LocalAddr:  "145.239.135.194",
+			LocalId:    "145.239.135.194",
+			RemoteId:   "13.51.6.188",
+			SecretRef: ipmanv1.SecretRef{
+				Name:      "ipsec-secret",
+				Namespace: "default",
+				Key:       "psk",
+			},
+			Children: map[string]ipmanv1.Child{
+				"7s": {
+					Name: "7s",
+					Extra: map[string]string{
+						"esp_proposals": "aes256-sha256-ecp256",
+					},
+					LocalIps:  []string{"10.0.2.0/24"},
+					RemoteIps: []string{"10.0.1.0/24"},
+					XfrmIP:    "10.0.2.1/24",
+					VxlanIP:   "10.0.2.2/24",
+					XfrmIfId:  102,
+					IpPools: map[string][]string{
+						"primary":   {"10.0.2.3/24", "10.0.2.4/24", "10.0.2.5/24", "10.0.2.6/24"},
+						"secondary": {"10.0.2.7/24", "10.0.2.8/24", "10.0.2.9/24", "10.0.2.10/24"},
+					},
+				},
+				"8s": {
+					Name: "8s",
+					Extra: map[string]string{
+						"esp_proposals": "aes256-sha256-ecp256",
+					},
+					LocalIps:  []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
+					RemoteIps: []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
+					XfrmIP:    "10.0.9.1/32",
+					VxlanIP:   "10.0.8.2/32",
+					XfrmIfId:  202,
+					IpPools: map[string][]string{
+						"worker":  {"10.0.9.8/32", "10.0.2.9/32"},
+						"manager": {"10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32", "10.0.4.4/32"},
+					},
+				},
+			},
+			NodeName: "localcluster2",
 		},
 	}
 	scheme = runtime.NewScheme()
@@ -92,7 +144,7 @@ var (
 
 func TestCreatingDesiredState(t *testing.T) {
 	ctx := context.Background()
-	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(&c).Build()
+	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(&c, &c2).Build()
 	actualDs := &ClusterState{
 		Nodes: []NodeState{
 			{
@@ -135,7 +187,7 @@ func TestCreatingDesiredState(t *testing.T) {
 							Props: XfrmProperties{
 								OwnerChild:      "3s",
 								OwnerConnection: "sodies-nix",
-								InterfaceID:     102,
+								InterfaceID:     101,
 								XfrmIP:          "10.0.2.1/24",
 								VxlanIP:         "10.0.2.2/24",
 							},
@@ -160,12 +212,83 @@ func TestCreatingDesiredState(t *testing.T) {
 								OwnerConnection: "sodies-nix",
 								XfrmIP:          "10.0.9.1/32",
 								VxlanIP:         "10.0.8.2/32",
-								InterfaceID:     202,
+								InterfaceID:     201,
 							},
 						},
 					},
 				},
 				NodeName: "localcluster",
+			}, {
+				Charon: &IpmanPod[CharonPodSpec]{
+					Meta: PodMeta{
+						Name:      "charon-pod-localcluster2",
+						Namespace: "ipman-system",
+						Node:      "localcluster2",
+						Image:     "plan9better/strongswan-charon:0.0.7",
+					},
+					Spec: CharonPodSpec{
+						HostPath: "/var/run/ipman",
+					},
+				},
+				Proxy: &IpmanPod[ProxyPodSpec]{
+					Meta: PodMeta{
+						Name:      "proxy-pod-localcluster2",
+						Namespace: "ipman-system",
+						Node:      "localcluster2",
+						Image:     "caddy:2.10.0-alpine",
+					},
+					Spec: ProxyPodSpec{
+						HostPath: "/var/run/ipman",
+					},
+				},
+				Xfrms: []IpmanPod[XfrmPodSpec]{
+					{
+						Meta: PodMeta{
+							Name:      "xfrm-pod-7s-sodies-nix2",
+							Namespace: "ipman-system",
+							Node:      "localcluster2",
+							Image:     "plan9better/xfrminion:latest-dev",
+						},
+						Spec: XfrmPodSpec{
+							Routes: Routes{
+								Local:     []string{"10.0.2.0/24"},
+								Remote:    []string{"10.0.1.0/24"},
+								BridgeFDB: LocalRoutes{},
+							},
+							Props: XfrmProperties{
+								OwnerChild:      "7s",
+								OwnerConnection: "sodies-nix2",
+								InterfaceID:     102,
+								XfrmIP:          "10.0.2.1/24",
+								VxlanIP:         "10.0.2.2/24",
+							},
+						},
+					},
+					{
+						Meta: PodMeta{
+							Name:      "xfrm-pod-8s-sodies-nix2",
+							Namespace: "ipman-system",
+							Node:      "localcluster2",
+							Image:     "plan9better/xfrminion:latest-dev",
+						},
+						Spec: XfrmPodSpec{
+							// TODO: fill those once we populate them in controller
+							Routes: Routes{
+								Local:     []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
+								Remote:    []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
+								BridgeFDB: LocalRoutes{},
+							},
+							Props: XfrmProperties{
+								OwnerChild:      "8s",
+								OwnerConnection: "sodies-nix2",
+								XfrmIP:          "10.0.9.1/32",
+								VxlanIP:         "10.0.8.2/32",
+								InterfaceID:     202,
+							},
+						},
+					},
+				},
+				NodeName: "localcluster2",
 			},
 		},
 	}
@@ -175,9 +298,9 @@ func TestCreatingDesiredState(t *testing.T) {
 	}
 
 	if !reflect.DeepEqual(ds, actualDs) {
-		d := pretty.Diff(actualDs, ds)
+		d, _ := diff.Diff(actualDs, ds)
 		for _, df := range d {
-			fmt.Println(df)
+			fmt.Printf("%+v", df)
 		}
 		t.Errorf("States are not equal")
 	}

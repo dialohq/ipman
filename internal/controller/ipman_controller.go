@@ -180,10 +180,14 @@ func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionRec
 // extracting properties and routes from pod annotations
 func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 	specJSON := p.Annotations[ipmanv1.AnnotationSpec]
-	spec := &XfrmPodSpec{}
-	_ = json.Unmarshal([]byte(specJSON), spec)
 
-	return IpmanPod[XfrmPodSpec]{
+	spec := &XfrmPodSpec{}
+	err := json.Unmarshal([]byte(specJSON), spec)
+	if err != nil {
+		fmt.Printf("Error unmarshaling XfrmPodSpec: %v\n", err)
+	}
+
+	result := IpmanPod[XfrmPodSpec]{
 		Meta: PodMeta{
 			Name:      p.Name,
 			Namespace: p.Namespace,
@@ -194,6 +198,7 @@ func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 		Spec: *spec,
 	}
 
+	return result
 }
 
 // FindPod finds a pod of the specified type on the given node
@@ -208,9 +213,11 @@ func FindPod[S IpmanPodSpec](ps []IpmanPod[S], node string) *IpmanPod[S] {
 
 // FindXfrms returns all Xfrm pods that are on the specified node
 func FindXfrms(ps []IpmanPod[XfrmPodSpec], node string) []IpmanPod[XfrmPodSpec] {
-	return slices.DeleteFunc(ps, func(p IpmanPod[XfrmPodSpec]) bool {
+	result := slices.DeleteFunc(ps, func(p IpmanPod[XfrmPodSpec]) bool {
 		return p.Meta.Node != node
 	})
+
+	return result
 }
 func hasAnnotations(p *corev1.Pod) bool {
 	_, ok1 := p.Annotations[ipmanv1.AnnotationChildName]
@@ -295,12 +302,14 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 		Nodes: []NodeState{},
 	}
 	for _, n := range nodes {
+		xfrmClone := make([]IpmanPod[XfrmPodSpec], len(xfrms))
+		copy(xfrmClone, xfrms)
+
+		nodeXfrms := FindXfrms(xfrmClone, n)
 		ns := NodeState{
-			Charon: FindPod(charons, n),
-			Proxy:  FindPod(proxies, n),
-			Xfrms: slices.DeleteFunc(xfrms, func(p IpmanPod[XfrmPodSpec]) bool {
-				return p.Meta.Node != n
-			}),
+			Charon:   FindPod(charons, n),
+			Proxy:    FindPod(proxies, n),
+			Xfrms:    nodeXfrms,
 			NodeName: n,
 		}
 		cs.Nodes = append(cs.Nodes, ns)
@@ -328,14 +337,14 @@ func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnect
 
 	ns := []NodeState{}
 	for n := range maps.Keys(nodeNames) {
+		ps := FindXfrms(slices.Clone(xfrms), n)
 		ns = append(ns, NodeState{
 			Charon:   FindPod(chs, n),
 			Proxy:    FindPod(prxs, n),
-			Xfrms:    FindXfrms(xfrms, n),
+			Xfrms:    ps,
 			NodeName: n,
 		})
 	}
-
 	return ns
 }
 
@@ -602,9 +611,29 @@ func isDeleted(c diff.Change) bool {
 	return (len(c.Path) == 0 && c.To == nil)
 }
 
+func comparePods[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *IpmanPod[Spec]) bool {
+	if desired == current {
+		return true
+	}
+
+	if desired == nil || current == nil {
+		return false
+	}
+
+	metaEqual := desired.Meta.Name == current.Meta.Name &&
+		desired.Meta.Namespace == current.Meta.Namespace &&
+		desired.Meta.Node == current.Meta.Node &&
+		(desired.Meta.Image == "" || current.Meta.Image == "" || desired.Meta.Image == current.Meta.Image) &&
+		desired.Meta.Owner.UID == current.Meta.Owner.UID &&
+		desired.Meta.Owner.Name == current.Meta.Owner.Name
+
+	specEqual := reflect.DeepEqual(desired.Spec, current.Spec)
+
+	return metaEqual && specEqual
+}
+
 func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *IpmanPod[Spec]) []Action {
-	changelog, _ := diff.Diff(desired, current)
-	if len(changelog) == 0 {
+	if comparePods(desired, current) {
 		return []Action{}
 	}
 
@@ -616,8 +645,11 @@ func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *Ipman
 		return []Action{&CreatePodAction[Spec]{Pod: desired}}
 	}
 
-	return []Action{&DeletePodAction[Spec]{Pod: current}, &CreatePodAction[Spec]{Pod: desired}}
+	if !comparePods(desired, current) {
+		return []Action{&DeletePodAction[Spec]{Pod: current}, &CreatePodAction[Spec]{Pod: desired}}
+	}
 
+	return []Action{}
 }
 
 func diffCharon(desired *IpmanPod[CharonPodSpec], current *IpmanPod[CharonPodSpec]) []Action {
@@ -805,9 +837,55 @@ func createXfrmPod(x IpmanPod[XfrmPodSpec]) []Action {
 	return acts
 }
 
+func compareXfrmPods(a, b IpmanPod[XfrmPodSpec]) bool {
+	if &a == &b {
+		return true
+	}
+
+	metaEqual := a.Meta.Name == b.Meta.Name &&
+		a.Meta.Namespace == b.Meta.Namespace &&
+		a.Meta.Node == b.Meta.Node &&
+		(a.Meta.Image == "" || b.Meta.Image == "" || a.Meta.Image == b.Meta.Image) &&
+		a.Meta.Owner.UID == b.Meta.Owner.UID &&
+		a.Meta.Owner.Name == b.Meta.Owner.Name
+
+	propsEqual := a.Spec.Props.OwnerChild == b.Spec.Props.OwnerChild &&
+		a.Spec.Props.OwnerConnection == b.Spec.Props.OwnerConnection &&
+		a.Spec.Props.InterfaceID == b.Spec.Props.InterfaceID &&
+		a.Spec.Props.XfrmIP == b.Spec.Props.XfrmIP &&
+		a.Spec.Props.VxlanIP == b.Spec.Props.VxlanIP
+
+	routesEqual := reflect.DeepEqual(a.Spec.Routes.Local, b.Spec.Routes.Local) &&
+		reflect.DeepEqual(a.Spec.Routes.Remote, b.Spec.Routes.Remote) &&
+		reflect.DeepEqual(a.Spec.Routes.BridgeFDB, b.Spec.Routes.BridgeFDB)
+
+	return metaEqual && propsEqual && routesEqual
+}
+
 func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 	logger := log.FromContext(context.Background())
-	if reflect.DeepEqual(desired, current) {
+
+	compareXfrmPodsLists := func(desired, current []IpmanPod[XfrmPodSpec]) bool {
+		if len(desired) != len(current) {
+			return false
+		}
+
+		slices.SortFunc(desired, func(a, b IpmanPod[XfrmPodSpec]) int {
+			return strings.Compare(a.Meta.Name, b.Meta.Name)
+		})
+		slices.SortFunc(current, func(a, b IpmanPod[XfrmPodSpec]) int {
+			return strings.Compare(a.Meta.Name, b.Meta.Name)
+		})
+		for i := range desired {
+			if !compareXfrmPods(desired[i], current[i]) {
+				return false
+			}
+		}
+		return true
+	}
+
+	if compareXfrmPodsLists(desired, current) {
+		fmt.Println("Xfrm pod lists are considered equal using custom comparison")
 		return []Action{}
 	}
 	// This should be sufficient since namespace will always be the same,
@@ -816,27 +894,42 @@ func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 	compareXfrms := func(a, b IpmanPod[XfrmPodSpec]) int {
 		return strings.Compare(a.Meta.Name, b.Meta.Name)
 	}
-	slices.SortFunc(desired, compareXfrms)
-	slices.SortFunc(current, compareXfrms)
 
 	acts := []Action{}
 	for _, x := range desired {
-		idx, exists := slices.BinarySearchFunc(current, x, compareXfrms)
+		exists := false
+		idx := -1
+		for i, p := range current {
+			if p.Meta.Name == x.Meta.Name {
+				exists = true
+				idx = i
+				break
+			}
+		}
 		if !exists {
-			acts = append(acts, createXfrmPod(x)...)
+			created := createXfrmPod(x)
+			acts = append(acts, created...)
 			continue
 		}
-		if reflect.DeepEqual(x, current[idx]) {
+
+		if compareXfrmPods(x, current[idx]) {
 			continue
 		}
-		if !reflect.DeepEqual(x.Spec.Props, current[idx].Spec.Props) {
+
+		if x.Spec.Props.OwnerChild != current[idx].Spec.Props.OwnerChild ||
+			x.Spec.Props.OwnerConnection != current[idx].Spec.Props.OwnerConnection ||
+			x.Spec.Props.InterfaceID != current[idx].Spec.Props.InterfaceID ||
+			x.Spec.Props.XfrmIP != current[idx].Spec.Props.XfrmIP ||
+			x.Spec.Props.VxlanIP != current[idx].Spec.Props.VxlanIP {
 			acts = append(acts, recreatePod(&current[idx], &x)...)
 			continue
 		}
+
 		if x.Meta.Node != current[idx].Meta.Node {
 			acts = append(acts, recreatePod(&current[idx], &x)...)
 			continue
 		}
+
 		if !reflect.DeepEqual(x.Spec.Routes, current[idx].Spec.Routes) {
 			actions, err := diffRoutes(current[idx], x)
 			if err != nil {
@@ -895,9 +988,21 @@ func DiffStates(desired *ClusterState, current *ClusterState) []Action {
 		}
 
 		if !reflect.DeepEqual(ns, current.Nodes[idx]) {
-			acts = append(acts, diffCharon(ns.Charon, current.Nodes[idx].Charon)...)
-			acts = append(acts, diffProxy(ns.Proxy, current.Nodes[idx].Proxy)...)
-			acts = append(acts, diffXfrms(ns.Xfrms, current.Nodes[idx].Xfrms)...)
+
+			if !reflect.DeepEqual(ns.Charon, current.Nodes[idx].Charon) {
+				charonActions := diffCharon(ns.Charon, current.Nodes[idx].Charon)
+				acts = append(acts, charonActions...)
+			}
+
+			if !reflect.DeepEqual(ns.Proxy, current.Nodes[idx].Proxy) {
+				proxyActions := diffProxy(ns.Proxy, current.Nodes[idx].Proxy)
+				acts = append(acts, proxyActions...)
+			}
+
+			if !reflect.DeepEqual(ns.Xfrms, current.Nodes[idx].Xfrms) {
+				xfrmActions := diffXfrms(ns.Xfrms, current.Nodes[idx].Xfrms)
+				acts = append(acts, xfrmActions...)
+			}
 		}
 	}
 
@@ -955,8 +1060,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 	logger.Info("Starting reconciler loop")
 	pod := corev1.Pod{}
 	err := r.Get(ctx, req.NamespacedName, &pod)
-	if apierrors.IsNotFound(err) {
-	} else {
+	if !apierrors.IsNotFound(err) {
 		if err != nil {
 			logger.Error(err, "Error fetching pod")
 			return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil

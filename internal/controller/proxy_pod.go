@@ -98,10 +98,12 @@ func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Po
 		return fmt.Errorf("Node '%s' not found", node)
 	}
 	for _, c := range conns {
-		c.Status.CharonProxyIP = pod.Status.PodIP
-		err = r.Status().Update(ctx, &c)
-		if err != nil {
-			return fmt.Errorf("Couldn't add proxy pod ip to status")
+		if c.Spec.NodeName == node {
+			c.Status.CharonProxyIP = pod.Status.PodIP
+			err = r.Status().Update(ctx, &c)
+			if err != nil {
+				return fmt.Errorf("Couldn't add proxy pod ip to status")
+			}
 		}
 	}
 	return nil
