@@ -72,17 +72,17 @@ clean:
 		-f namespace.yaml || true
 
 vxlandlord:
-	docker build -t 192.168.10.201:5000/vxlandlord:latest-dev --platform linux/arm64 --file ./vxlandlord.Dockerfile .
-	docker push 192.168.10.201:5000/vxlandlord:latest-dev 
+	docker build -t plan9better/vxlandlord:0.1.0 --platform linux/arm64 --file ./vxlandlord.Dockerfile .
+	docker push plan9better/vxlandlord:0.1.0 
 xfrminion:
-	docker build -t 192.168.10.201:5000/xfrminion:latest-dev --platform linux/arm64 --file ./xfrminion.Dockerfile .
-	docker push 192.168.10.201:5000/xfrminion:latest-dev 
+	docker build -t plan9better/xfrminion:0.1.0 --platform linux/arm64 --file ./xfrminion.Dockerfile .
+	docker push plan9better/xfrminion:0.1.0 
 restctl:
-	docker build -t 192.168.10.201:5000/restctl:latest-dev --platform linux/arm64 --file ./restctl.Dockerfile .
-	docker push 192.168.10.201:5000/restctl:latest-dev
+	docker build -t plan9better/restctl:0.1.0 --platform linux/arm64 --file ./restctl.Dockerfile .
+	docker push plan9better/restctl:0.1.0
 operator:
-	docker build -t 192.168.10.201:5000/operator:latest-dev --platform linux/arm64 --file ./operator.Dockerfile .
-	docker push 192.168.10.201:5000/operator:latest-dev 
+	docker build -t plan9better/operator:0.1.0 --platform linux/arm64 --file ./operator.Dockerfile .
+	docker push plan9better/operator:0.1.0 
 charon:
-	docker build -t 192.168.10.201:5000/charon:latest-dev --platform linux/arm64 --file ./charon.Dockerfile .
-	docker push 192.168.10.201:5000/charon:latest-dev 
+	docker build -t plan9better/charon:0.1.0 --platform linux/arm64 --file ./charon.Dockerfile .
+	docker push plan9better/charon:0.1.0 
