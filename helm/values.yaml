@@ -7,7 +7,7 @@ global:
 # Controller (operator) configuration
 controller:
   replicaCount: 1
-  image: "192.168.10.201:5000/operator:latest-dev"
+  image: "plan9better/operator:0.1.0"
   pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true
@@ -28,18 +28,18 @@ caddy:
   pullPolicy: "Always"
 # Restctl service configuration
 restctl:
-  image: "192.168.10.201:5000/restctl:latest-dev"
+  image: "plan9better/restctl:0.1.0"
   pullPolicy: "Always"
 # VxlanLord configuration
 vxlandlord:
-  image: "192.168.10.201:5000/vxlandlord:latest-dev"
+  image: "plan9better/vxlandlord:0.1.0"
 # XfrmMinion configuration
 xfrminion:
-  image: "192.168.10.201:5000/xfrminion:latest-dev"
+  image: "plan9better/xfrminion:0.1.0"
   pullPolicy: "Always"
 # Charon daemon configuration
 charon:
-  image: "192.168.10.201:5000/charon:latest-dev"
+  image: "plan9better/charon:0.1.0"
   pullPolicy: "Always"
 # Webhook configuration
 webhook:

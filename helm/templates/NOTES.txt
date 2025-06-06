@@ -1,1 +1,24 @@
-Ipman - IPsec (vpn) Manager
+Thank you for installing IPMan - IPSec Connection Manager!
+
+The IPMan operator has been deployed to your cluster and is ready to manage IPSec connections.
+
+To get started:
+
+1. Create a secret with your pre-shared key:
+   kubectl create secret generic ipsec-secret -n default --from-literal=example=yourpresharedkey
+
+2. Create an IPSecConnection custom resource:
+   kubectl apply -f your-ipsec-connection.yaml
+
+3. Check the status of your IPSecConnection:
+   kubectl get ipsecconnection -n {{ .Release.Namespace }}
+   kubectl describe ipsecconnection your-connection-name -n {{ .Release.Namespace }}
+
+4. When deploying workloads that need to use the VPN connection, add the required annotations:
+   - ipman.dialo.ai/childName: "your-child-name"
+   - ipman.dialo.ai/ipmanName: "your-connection-name"
+   - ipman.dialo.ai/poolName: "your-pool-name"
+
+For more information, please refer to the README.md or documentation.
+
+IMPORTANT: Make sure your worker pods/deployments have the correct annotations to use the IPSec tunnel.
