@@ -509,7 +509,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 					},
 				}
 			},
-			expectedActions: 3, // Delete and create for both Charon and Restctl pods
+			expectedActions: 2, // Delete and create for Charon pod only
 		},
 	}
 

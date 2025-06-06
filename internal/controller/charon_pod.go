@@ -8,7 +8,6 @@ import (
 // CharonPodSpec defines the specification for a Charon pod with restctl container
 type CharonPodSpec struct {
 	HostPath string `json:"host_path" diff:"host_path"`
-	// NodeName string `json:"node_name"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for CharonPodSpec

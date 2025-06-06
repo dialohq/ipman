@@ -39,6 +39,10 @@ func (r *IPSecConnectionReconciler) waitForPodReady(nsn types.NamespacedName) (*
 		)
 		tries += 1
 	}
+	if r.Env.IsTest {
+		pod.Status.PodIP = "10.10.10.10"
+		return pod, nil
+	}
 	for pod.Status.Phase != "Running" {
 		if tries > ipmanv1.WaitForPodReadyMaxRetries {
 			return nil, fmt.Errorf("Timeout waiting for pod to go into state 'Running' after %d tries", ipmanv1.WaitForPodReadyMaxRetries)

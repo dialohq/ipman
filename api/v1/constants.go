@@ -12,9 +12,6 @@ const (
 	WaitForPodReadyMaxRetries = 30
 	// DeletePodMaxRetries is the maximum number of retries for pod deletion
 	DeletePodMaxRetries = 5
-	// WaitForDeletePodMaxRetries is the maximum number of retries to wait for pod deletion
-	WaitForDeletePodMaxRetries = 35 // 30s timeout + 5 error buffer
-
 	// UpdateStatusMaxRetries is the maximuma number of times controller will try to
 	// update the status of an ipman despite 'conflict' error before giving up
 	UpdateStatusMaxRetries = 5
@@ -50,9 +47,8 @@ const (
 	InterfaceRequestContainerName = "iface-request"
 	CharonSocketHostVolumeName    = "charon-host-socket"
 
-	CharonPodName  = "charon-pod" // keep this 2 part seperated with '-'
-	RestctlPodName = "restctl-pod"
-	ProxyPodName   = "proxy-pod"
+	CharonPodName = "charon-pod" // keep this 2 part seperated with '-'
+	ProxyPodName  = "proxy-pod"
 	// CharonSocketVolumeName          = "charon-volume"
 
 	// CharonSocketVolumeMountPath specifies the path where the charon socket volume is mounted.

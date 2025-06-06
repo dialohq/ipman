@@ -98,7 +98,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					Xfrms:  []IpmanPod[XfrmPodSpec]{},
 				}
 			},
-			expectedActions: 3, // Create actions for Charon, Restctl, Proxy, 1 Xfrm
+			expectedActions: 3, // Create actions for Charon, Proxy, 1 Xfrm
 			validateActions: func(t *testing.T, actions []Action) {
 				for _, action := range actions {
 					if _, ok := action.(*CreatePodAction[CharonPodSpec]); ok {
@@ -129,7 +129,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			expectedActions: 3, // Delete actions for Charon, Restctl, Proxy and 1 xfrm
+			expectedActions: 3, // Delete actions for Charon, Proxy and 1 xfrm
 			validateActions: func(t *testing.T, actions []Action) {
 				for _, action := range actions {
 					if _, ok := action.(*DeletePodAction[CharonPodSpec]); ok {
@@ -247,7 +247,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			expectedActions: 8, // Delete and create for Charon, Restctl, Proxy, and Xfrm
+			expectedActions: 6, // Delete and create for Charon, Proxy, and Xfrm
 			validateActions: func(t *testing.T, actions []Action) {
 				deleteCount := 0
 				createCount := 0
@@ -293,11 +293,11 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					}
 				}
 
-				if deleteCount != 4 {
-					t.Errorf("Expected 4 delete actions, got %d", deleteCount)
+				if deleteCount != 3 {
+					t.Errorf("Expected 3 delete actions, got %d", deleteCount)
 				}
-				if createCount != 4 {
-					t.Errorf("Expected 4 create actions, got %d", createCount)
+				if createCount != 3 {
+					t.Errorf("Expected 3 create actions, got %d", createCount)
 				}
 			},
 		},
@@ -468,13 +468,13 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 			name:            "Add missing pods on both nodes",
 			desiredSetup:    ClusterState{Nodes: []NodeState{node_with_pods1, node_with_pods2}},
 			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			expectedActions: 2, // Create for node1 Proxy and node2 Restctl
+			expectedActions: 1, // Create for node1 Proxy
 		},
 		{
 			name:            "Remove pods from both nodes",
 			desiredSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
 			currentSetup:    ClusterState{Nodes: []NodeState{node_with_pods1, node_with_pods2}},
-			expectedActions: 2, // Delete for node1 Proxy and node2 Restctl
+			expectedActions: 1, // Delete for node1 Proxy
 		},
 	}
 
