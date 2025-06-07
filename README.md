@@ -158,7 +158,8 @@ If you encounter issues with your IPSec connections:
 IPMan operates by running an instance of Charon (StrongSwan’s IKE daemon) on a user-specified node. On that same node, a pod is created for each child connection defined in the IPSec configuration. Each of these pods is equipped with an XFRM interface.
 In addition to the XFRM interface, a VXLAN interface is also set up inside these pods. Incoming traffic from the remote site is routed through the XFRM interface and into the VXLAN. The other end of this VXLAN is injected into the target workload pods, allowing them to communicate securely.
 This design ensures that the only publicly exposed ports are 500 and 4500, which are required for IKE and IPSec traffic handled by Charon.
-To facilitate internal communication, a proxy pod is also deployed. It acts as a REST API gateway between pods. This allows Charon to operate within the host network namespace without occupying additional host ports unnecessarily.
+To facilitate internal communication, a proxy pod is also deployed. It acts as a REST API gateway between pods, enabling components to interact with Charon, which must run in the host network namespace. Instead of using TCP ports, the proxy communicates with Charon over a Unix domain socket, which avoids consuming any ports on the host. This design keeps the public exposure limited strictly to ports 500 and 4500 for IKE and IPSec traffic.
+
 
 ## License
 
