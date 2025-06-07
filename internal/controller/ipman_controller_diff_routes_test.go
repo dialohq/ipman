@@ -12,7 +12,7 @@ func TestDiffRoutes(t *testing.T) {
 			Meta: PodMeta{
 				Name:      name,
 				Namespace: "ipman-system",
-				Node:      node,
+				NodeName:  node,
 				Image:     "test-image",
 			},
 			Spec: XfrmPodSpec{

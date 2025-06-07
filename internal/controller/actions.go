@@ -38,7 +38,7 @@ func (a *CreatePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconcile
 	if err != nil {
 		return err
 	}
-	return a.Pod.Spec.CompleteSetup(r, finishedPod, a.Pod.Meta.Node)
+	return a.Pod.Spec.CompleteSetup(r, finishedPod, a.Pod.Meta.NodeName)
 }
 
 // DeletePodAction represents an action to delete a pod of a specific type
@@ -58,7 +58,7 @@ func (a *DeletePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconcile
 	if err != nil {
 		return fmt.Errorf("Couldn't list ipmen while deleting pod: %w", err)
 	}
-	a.Pod.Spec.CompleteDeletion(r, &pod, a.Pod.Meta.Node)
+	a.Pod.Spec.CompleteDeletion(r, &pod, a.Pod.Meta.NodeName)
 	return nil
 }
 

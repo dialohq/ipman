@@ -107,13 +107,9 @@ func deleteBridgeFDB(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	command := fmt.Sprintf("bridge fdb show | grep %s | awk '{print $1}' | xargs -I {arg} bridge fdb del {arg} dev %s dst %s", bfr.CiliumIP, (*link).Attrs().Name, bfr.CiliumIP)
-	fmt.Println(command)
 	cmd = exec.Command("bash", "-c", command)
 	if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
 		logger.Error("Error deleting mac address bridge fdb entry", "msg", err)
-		// code := 409
-		// writeError(w, err, &code)
-		// return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
