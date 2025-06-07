@@ -54,9 +54,9 @@ func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 	pod.Annotations = map[string]string{
 		ipmanv1.AnnotationSpec: string(an),
 	}
-	if p.Meta.Node != "" {
+	if p.Meta.NodeName != "" {
 		pod.Spec.NodeSelector = map[string]string{
-			ipmanv1.NodeSelectorHostName: p.Meta.Node,
+			ipmanv1.NodeSelectorHostName: p.Meta.NodeName,
 		}
 	}
 
@@ -86,7 +86,8 @@ type PodMeta struct {
 	Name      string `json:"name" diff:"name"`
 	Namespace string `json:"namespace" diff:"namespace"`
 	IP        string `json:"ip" diff:"-"`
-	Node      string `json:"node" diff:"node"`
+	NodeName  string `json:"node" diff:"node"`
+	NodeID    string `json:"node_id" diff:"node_id"`
 	Image     string `json:"image" diff:"image"`
 	Owner     Owner  `json:"owner" diff:"owner"`
 }
@@ -94,10 +95,16 @@ type PodMeta struct {
 // NodeState represents the state of all IPMan pods on a specific node
 // +k8s:deepcopy-gen=true
 type NodeState struct {
-	Charon   *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
-	Proxy    *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
-	Xfrms    []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
-	NodeName string                   `json:"name" diff:"name"`
+	Charon    *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
+	Proxy     *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
+	Xfrms     []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
+	NodeName  string                   `json:"name" diff:"name"`
+	MachineID string                   `json:"machine_id" diff:"machine_id"`
+}
+
+type NodeInfo struct {
+	Name string
+	ID   string
 }
 
 // ClusterState represents the state of all nodes in the cluster

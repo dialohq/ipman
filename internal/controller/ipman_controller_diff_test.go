@@ -25,7 +25,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -36,7 +36,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -52,7 +52,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -67,7 +67,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -83,7 +83,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "new-image",
 				},
 				Spec: CharonPodSpec{
@@ -94,7 +94,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "old-image",
 				},
 				Spec: CharonPodSpec{
@@ -109,7 +109,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -120,7 +120,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -135,7 +135,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "new-node",
+					NodeName:  "new-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -146,7 +146,7 @@ func TestDiffCharon(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "old-node",
+					NodeName:  "old-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -209,7 +209,7 @@ func TestDiffProxy(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{},
@@ -218,7 +218,7 @@ func TestDiffProxy(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{},
@@ -232,7 +232,7 @@ func TestDiffProxy(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{},
@@ -245,7 +245,7 @@ func TestDiffProxy(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{},
@@ -259,7 +259,7 @@ func TestDiffProxy(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "new-node",
+					NodeName:  "new-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{},
@@ -268,7 +268,7 @@ func TestDiffProxy(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "old-node",
+					NodeName:  "old-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{},
@@ -329,7 +329,7 @@ func TestDiffImmutablePod(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -340,7 +340,7 @@ func TestDiffImmutablePod(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -356,7 +356,7 @@ func TestDiffImmutablePod(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -371,7 +371,7 @@ func TestDiffImmutablePod(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -387,7 +387,7 @@ func TestDiffImmutablePod(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "new-image",
 				},
 				Spec: CharonPodSpec{
@@ -398,7 +398,7 @@ func TestDiffImmutablePod(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "old-image",
 				},
 				Spec: CharonPodSpec{
@@ -588,7 +588,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "test-image",
 								},
 								Spec: CharonPodSpec{
@@ -609,7 +609,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "test-image",
 								},
 								Spec: CharonPodSpec{
@@ -634,7 +634,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "test-image",
 								},
 								Spec: CharonPodSpec{
@@ -670,7 +670,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "new-image",
 								},
 								Spec: CharonPodSpec{
@@ -691,7 +691,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "old-image",
 								},
 								Spec: CharonPodSpec{
@@ -717,7 +717,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "proxy-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "test-image",
 								},
 								Spec: ProxyPodSpec{},
@@ -750,7 +750,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "new-image",
 								},
 								Spec: CharonPodSpec{
@@ -771,7 +771,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "charon-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "old-image",
 								},
 								Spec: CharonPodSpec{
@@ -782,7 +782,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 								Meta: PodMeta{
 									Name:      "proxy-pod-test",
 									Namespace: "ipman-system",
-									Node:      "test-node",
+									NodeName:  "test-node",
 									Image:     "test-image",
 								},
 								Spec: ProxyPodSpec{},
@@ -826,7 +826,7 @@ func TestCharonPodImageChanged(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-test",
 						Namespace: "ipman-system",
-						Node:      "test-node",
+						NodeName:  "test-node",
 						Image:     "original-image",
 					},
 					Spec: CharonPodSpec{
@@ -850,7 +850,7 @@ func TestCharonPodImageChanged(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-test",
 						Namespace: "ipman-system",
-						Node:      "test-node",
+						NodeName:  "test-node",
 						Image:     "new-image", // Different image
 					},
 					Spec: CharonPodSpec{

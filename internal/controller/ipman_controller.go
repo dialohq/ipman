@@ -140,7 +140,7 @@ func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
 			Name:      p.Name,
 			Namespace: p.Namespace,
 			IP:        p.Status.PodIP,
-			Node:      p.Spec.NodeName,
+			NodeName:  p.Spec.NodeName,
 			Image:     ExtractContainerImage(p, ipmanv1.CharonDaemonContainerName),
 		},
 	}
@@ -156,7 +156,7 @@ func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
 			Name:      p.Name,
 			Namespace: p.Namespace,
 			IP:        p.Status.PodIP,
-			Node:      p.Spec.NodeName,
+			NodeName:  p.Spec.NodeName,
 			Image:     ExtractContainerImage(p, ipmanv1.CharonAPIProxyContainerName),
 		},
 	}
@@ -192,7 +192,7 @@ func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 			Name:      p.Name,
 			Namespace: p.Namespace,
 			IP:        p.Status.PodIP,
-			Node:      p.Spec.NodeName,
+			NodeName:  p.Spec.NodeName,
 			Image:     ExtractContainerImage(p, ipmanv1.XfrminionContainerName),
 		},
 		Spec: *spec,
@@ -204,7 +204,7 @@ func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 // FindPod finds a pod of the specified type on the given node
 func FindPod[S IpmanPodSpec](ps []IpmanPod[S], node string) *IpmanPod[S] {
 	for _, p := range ps {
-		if p.Meta.Node == node {
+		if p.Meta.NodeName == node {
 			return &p
 		}
 	}
@@ -214,7 +214,7 @@ func FindPod[S IpmanPodSpec](ps []IpmanPod[S], node string) *IpmanPod[S] {
 // FindXfrms returns all Xfrm pods that are on the specified node
 func FindXfrms(ps []IpmanPod[XfrmPodSpec], node string) []IpmanPod[XfrmPodSpec] {
 	result := slices.DeleteFunc(ps, func(p IpmanPod[XfrmPodSpec]) bool {
-		return p.Meta.Node != node
+		return p.Meta.NodeName != node
 	})
 
 	return result
@@ -232,7 +232,7 @@ func workerFromPod(p *corev1.Pod) Worker {
 			Name:      p.Name,
 			Namespace: p.Namespace,
 			IP:        p.Status.PodIP,
-			Node:      p.Spec.NodeName,
+			NodeName:  p.Spec.NodeName,
 		},
 		Spec: WorkerPodSpec{
 			Routes: []Route{
@@ -324,38 +324,62 @@ func sortPods[Spec IpmanPodSpec](p []IpmanPod[Spec]) {
 }
 
 // CreateClusterNodes creates NodeState objects for all nodes referenced in IPSecConnections
-func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnection) []NodeState {
-	nodeNames := map[string]string{}
+func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnection) ([]NodeState, error) {
+	nodeNames := map[string]NodeInfo{}
 	for _, c := range cl {
-		nodeNames[c.Spec.NodeName] = c.Name
+		id, err := r.GetNodeID(c.Spec.NodeName)
+		if err != nil {
+			if apierrors.IsNotFound(err) {
+				// Don't create desired state for nodes that don't exist
+				continue
+			} else {
+				return nil, err
+			}
+		}
+		nodeNames[c.Spec.NodeName] = NodeInfo{Name: c.Name, ID: id}
 	}
 
-	chs := r.CreateCharons(cl)
-	prxs := r.CreateProxies(cl)
+	chs := r.CreateCharons(cl, nodeNames)
+	prxs := r.CreateProxies(cl, nodeNames)
 	xfrms := r.CreateXfrms(cl)
 	sortPods(xfrms)
 
 	ns := []NodeState{}
-	for n := range maps.Keys(nodeNames) {
+	for n, v := range nodeNames {
 		ps := FindXfrms(slices.Clone(xfrms), n)
 		ns = append(ns, NodeState{
-			Charon:   FindPod(chs, n),
-			Proxy:    FindPod(prxs, n),
-			Xfrms:    ps,
-			NodeName: n,
+			Charon:    FindPod(chs, n),
+			Proxy:     FindPod(prxs, n),
+			Xfrms:     ps,
+			NodeName:  n,
+			MachineID: v.ID,
 		})
 	}
-	return ns
+	return ns, nil
+}
+
+func (r *IPSecConnectionReconciler) GetNodeID(name string) (string, error) {
+	ns := &corev1.NodeList{}
+	err := r.List(context.Background(), ns)
+	if err != nil {
+		return "", err
+	}
+	for _, n := range ns.Items {
+		if n.Name == name {
+			return n.Status.NodeInfo.MachineID, nil
+		}
+	}
+	return "", nil
 }
 
 // CreateCharons creates Charon pod specifications for the given IPSecConnections
-func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection) []IpmanPod[CharonPodSpec] {
+func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection, nodes map[string]NodeInfo) []IpmanPod[CharonPodSpec] {
 	chs := []IpmanPod[CharonPodSpec]{}
 	for _, c := range cl {
 		ch := IpmanPod[CharonPodSpec]{}
 		ch.Meta = PodMeta{
-			Node:      c.Spec.NodeName,
-			Name:      strings.Join([]string{ipmanv1.CharonPodName, c.Spec.NodeName}, "-"),
+			NodeName:  c.Spec.NodeName,
+			Name:      strings.Join([]string{ipmanv1.CharonPodName, nodes[c.Spec.NodeName].ID}, "-"),
 			Namespace: r.Env.NamespaceName,
 			Image:     r.Env.CharonDaemonImage,
 		}
@@ -368,13 +392,13 @@ func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection) 
 }
 
 // CreateProxies creates Proxy pod specifications for the given IPSecConnections
-func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection) []IpmanPod[ProxyPodSpec] {
+func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection, nodes map[string]NodeInfo) []IpmanPod[ProxyPodSpec] {
 	prxs := []IpmanPod[ProxyPodSpec]{}
 	for _, c := range cl {
 		prx := IpmanPod[ProxyPodSpec]{}
 		prx.Meta = PodMeta{
-			Node:      c.Spec.NodeName,
-			Name:      strings.Join([]string{ipmanv1.ProxyPodName, c.Spec.NodeName}, "-"),
+			NodeName:  c.Spec.NodeName,
+			Name:      strings.Join([]string{ipmanv1.ProxyPodName, nodes[c.Spec.NodeName].ID}, "-"),
 			Namespace: r.Env.NamespaceName,
 			Image:     r.Env.CaddyImage,
 		}
@@ -518,7 +542,7 @@ func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []
 			x.Meta = PodMeta{
 				Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, conn.Name}, "-"),
 				Namespace: r.Env.NamespaceName,
-				Node:      conn.Spec.NodeName,
+				NodeName:  conn.Spec.NodeName,
 				Image:     r.Env.XfrminionImage,
 			}
 			xfrms = append(xfrms, x)
@@ -534,7 +558,10 @@ func (r *IPSecConnectionReconciler) CreateNodes(ctx context.Context) ([]NodeStat
 		e := &RequestError{ActionType: "List", Resource: "IPSecConnections", Err: err}
 		return nil, e
 	}
-	ns := r.CreateClusterNodes(cl.Items)
+	ns, err := r.CreateClusterNodes(cl.Items)
+	if err != nil {
+		return nil, err
+	}
 	slices.SortFunc(ns, func(a, b NodeState) int {
 		return strings.Compare(a.NodeName, b.NodeName)
 	})
@@ -622,7 +649,7 @@ func comparePods[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *IpmanPod[S
 
 	metaEqual := desired.Meta.Name == current.Meta.Name &&
 		desired.Meta.Namespace == current.Meta.Namespace &&
-		desired.Meta.Node == current.Meta.Node &&
+		desired.Meta.NodeName == current.Meta.NodeName &&
 		(desired.Meta.Image == "" || current.Meta.Image == "" || desired.Meta.Image == current.Meta.Image) &&
 		desired.Meta.Owner.UID == current.Meta.Owner.UID &&
 		desired.Meta.Owner.Name == current.Meta.Owner.Name
@@ -844,7 +871,7 @@ func compareXfrmPods(a, b IpmanPod[XfrmPodSpec]) bool {
 
 	metaEqual := a.Meta.Name == b.Meta.Name &&
 		a.Meta.Namespace == b.Meta.Namespace &&
-		a.Meta.Node == b.Meta.Node &&
+		a.Meta.NodeName == b.Meta.NodeName &&
 		(a.Meta.Image == "" || b.Meta.Image == "" || a.Meta.Image == b.Meta.Image) &&
 		a.Meta.Owner.UID == b.Meta.Owner.UID &&
 		a.Meta.Owner.Name == b.Meta.Owner.Name
@@ -885,7 +912,6 @@ func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 	}
 
 	if compareXfrmPodsLists(desired, current) {
-		fmt.Println("Xfrm pod lists are considered equal using custom comparison")
 		return []Action{}
 	}
 	// This should be sufficient since namespace will always be the same,
@@ -925,7 +951,7 @@ func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 			continue
 		}
 
-		if x.Meta.Node != current[idx].Meta.Node {
+		if x.Meta.NodeName != current[idx].Meta.NodeName {
 			acts = append(acts, recreatePod(&current[idx], &x)...)
 			continue
 		}

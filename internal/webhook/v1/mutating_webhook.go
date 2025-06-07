@@ -237,11 +237,12 @@ type jsonPatch struct {
 
 func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
 	patch := []jsonPatch{}
+	addr, _, _ := strings.Cut(ip, "/")
 	for i := range p.Spec.Containers {
 		env := []corev1.EnvVar{
 			{
 				Name:  ipmanv1.WorkerContainerVxlanIPEnvVarName,
-				Value: ip,
+				Value: addr,
 			},
 		}
 		patch = append(patch, jsonPatch{

@@ -317,23 +317,23 @@ func TestAddIPSecConnection(t *testing.T) {
 	for _, action := range actions {
 		switch a := action.(type) {
 		case *CreatePodAction[CharonPodSpec]:
-			if a.Pod.Meta.Node == "node2" {
+			if a.Pod.Meta.NodeName == "node2" {
 				node2CharonActions++
-			} else if a.Pod.Meta.Node == "node1" {
+			} else if a.Pod.Meta.NodeName == "node1" {
 				node1CharonActions++
 			}
 		case *CreatePodAction[ProxyPodSpec]:
-			if a.Pod.Meta.Node == "node2" {
+			if a.Pod.Meta.NodeName == "node2" {
 				node2ProxyActions++
-			} else if a.Pod.Meta.Node == "node1" {
+			} else if a.Pod.Meta.NodeName == "node1" {
 				node1ProxyActions++
 			}
 		case *CreatePodAction[XfrmPodSpec]:
-			if a.Pod.Meta.Node == "node2" {
+			if a.Pod.Meta.NodeName == "node2" {
 				node2XfrmActions++
 				assert.Equal(t, "new-connection", a.Pod.Spec.Props.OwnerConnection, "Xfrm pod should be for new connection")
 				assert.Equal(t, "child2", a.Pod.Spec.Props.OwnerChild, "Xfrm pod should be for child2")
-			} else if a.Pod.Meta.Node == "node1" {
+			} else if a.Pod.Meta.NodeName == "node1" {
 				node1XfrmActions++
 			}
 		}

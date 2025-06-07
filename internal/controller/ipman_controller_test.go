@@ -152,7 +152,7 @@ func TestCreatingDesiredState(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-localcluster",
 						Namespace: "ipman-system",
-						Node:      "localcluster",
+						NodeName:  "localcluster",
 						Image:     "plan9better/strongswan-charon:0.0.7",
 					},
 					Spec: CharonPodSpec{
@@ -163,7 +163,7 @@ func TestCreatingDesiredState(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "proxy-pod-localcluster",
 						Namespace: "ipman-system",
-						Node:      "localcluster",
+						NodeName:  "localcluster",
 						Image:     "caddy:2.10.0-alpine",
 					},
 					Spec: ProxyPodSpec{
@@ -175,7 +175,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						Meta: PodMeta{
 							Name:      "xfrm-pod-3s-sodies-nix",
 							Namespace: "ipman-system",
-							Node:      "localcluster",
+							NodeName:  "localcluster",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
@@ -197,7 +197,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						Meta: PodMeta{
 							Name:      "xfrm-pod-4s-sodies-nix",
 							Namespace: "ipman-system",
-							Node:      "localcluster",
+							NodeName:  "localcluster",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
@@ -223,7 +223,7 @@ func TestCreatingDesiredState(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-localcluster2",
 						Namespace: "ipman-system",
-						Node:      "localcluster2",
+						NodeName:  "localcluster2",
 						Image:     "plan9better/strongswan-charon:0.0.7",
 					},
 					Spec: CharonPodSpec{
@@ -234,7 +234,7 @@ func TestCreatingDesiredState(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "proxy-pod-localcluster2",
 						Namespace: "ipman-system",
-						Node:      "localcluster2",
+						NodeName:  "localcluster2",
 						Image:     "caddy:2.10.0-alpine",
 					},
 					Spec: ProxyPodSpec{
@@ -246,7 +246,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						Meta: PodMeta{
 							Name:      "xfrm-pod-7s-sodies-nix2",
 							Namespace: "ipman-system",
-							Node:      "localcluster2",
+							NodeName:  "localcluster2",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
@@ -268,7 +268,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						Meta: PodMeta{
 							Name:      "xfrm-pod-8s-sodies-nix2",
 							Namespace: "ipman-system",
-							Node:      "localcluster2",
+							NodeName:  "localcluster2",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
@@ -377,7 +377,7 @@ func TestDiffStates(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-test",
 						Namespace: "ipman-system",
-						Node:      "localcluster",
+						NodeName:  "localcluster",
 						Image:     "test-image",
 					},
 					Spec: CharonPodSpec{
@@ -415,7 +415,7 @@ func TestDiffStates(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-to-delete",
 						Namespace: "ipman-system",
-						Node:      "localcluster",
+						NodeName:  "localcluster",
 						Image:     "test-image",
 					},
 					Spec: CharonPodSpec{
@@ -468,7 +468,7 @@ func TestDiffStates(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-to-update",
 						Namespace: "ipman-system",
-						Node:      "localcluster",
+						NodeName:  "localcluster",
 						Image:     "old-image",
 					},
 					Spec: CharonPodSpec{
@@ -489,7 +489,7 @@ func TestDiffStates(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "charon-pod-to-update",
 						Namespace: "ipman-system",
-						Node:      "localcluster",
+						NodeName:  "localcluster",
 						Image:     "new-image",
 					},
 					Spec: CharonPodSpec{

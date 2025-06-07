@@ -18,7 +18,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -29,7 +29,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "proxy-pod-test",
 					Namespace: "ipman-system",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: ProxyPodSpec{
@@ -41,7 +41,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					Meta: PodMeta{
 						Name:      "xfrm-pod-test",
 						Namespace: "ipman-system",
-						Node:      "test-node",
+						NodeName:  "test-node",
 						Image:     "test-image",
 					},
 					Spec: XfrmPodSpec{
@@ -234,10 +234,10 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				out, _ := json.Marshal(ns)
 				ns2 := &NodeState{}
 				_ = json.Unmarshal(out, ns2)
-				ns2.Charon.Meta.Node = "new-node"
-				ns2.Proxy.Meta.Node = "new-node"
+				ns2.Charon.Meta.NodeName = "new-node"
+				ns2.Proxy.Meta.NodeName = "new-node"
 				for i := range ns2.Xfrms {
-					ns2.Xfrms[i].Meta.Node = "new-node"
+					ns2.Xfrms[i].Meta.NodeName = "new-node"
 				}
 				return *ns2
 			},
@@ -259,16 +259,16 @@ func TestDiffStatesComprehensive(t *testing.T) {
 						// Check that the node is the old one
 						switch typedAction := action.(type) {
 						case *DeletePodAction[CharonPodSpec]:
-							if typedAction.Pod.Meta.Node != "test-node" {
-								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.Node)
+							if typedAction.Pod.Meta.NodeName != "test-node" {
+								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						case *DeletePodAction[ProxyPodSpec]:
-							if typedAction.Pod.Meta.Node != "test-node" {
-								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.Node)
+							if typedAction.Pod.Meta.NodeName != "test-node" {
+								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						case *DeletePodAction[XfrmPodSpec]:
-							if typedAction.Pod.Meta.Node != "test-node" {
-								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.Node)
+							if typedAction.Pod.Meta.NodeName != "test-node" {
+								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						}
 					case *CreatePodAction[CharonPodSpec], *CreatePodAction[ProxyPodSpec], *CreatePodAction[XfrmPodSpec]:
@@ -276,16 +276,16 @@ func TestDiffStatesComprehensive(t *testing.T) {
 						// Check that the node is the new one
 						switch typedAction := action.(type) {
 						case *CreatePodAction[CharonPodSpec]:
-							if typedAction.Pod.Meta.Node != "new-node" {
-								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.Node)
+							if typedAction.Pod.Meta.NodeName != "new-node" {
+								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						case *CreatePodAction[ProxyPodSpec]:
-							if typedAction.Pod.Meta.Node != "new-node" {
-								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.Node)
+							if typedAction.Pod.Meta.NodeName != "new-node" {
+								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						case *CreatePodAction[XfrmPodSpec]:
-							if typedAction.Pod.Meta.Node != "new-node" {
-								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.Node)
+							if typedAction.Pod.Meta.NodeName != "new-node" {
+								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						}
 					default:
@@ -345,7 +345,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 			Meta: PodMeta{
 				Name:      "charon-pod-node1",
 				Namespace: "ipman-system",
-				Node:      "node1",
+				NodeName:  "node1",
 				Image:     "charon-image",
 			},
 			Spec: CharonPodSpec{
@@ -362,7 +362,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 			Meta: PodMeta{
 				Name:      "charon-pod-node2",
 				Namespace: "ipman-system",
-				Node:      "node2",
+				NodeName:  "node2",
 				Image:     "charon-image",
 			},
 			Spec: CharonPodSpec{
@@ -373,7 +373,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 			Meta: PodMeta{
 				Name:      "proxy-pod-node2",
 				Namespace: "ipman-system",
-				Node:      "node2",
+				NodeName:  "node2",
 				Image:     "proxy-image",
 			},
 			Spec: ProxyPodSpec{},
@@ -383,7 +383,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "xfrm-pod-node2",
 					Namespace: "ipman-system",
-					Node:      "node2",
+					NodeName:  "node2",
 					Image:     "xfrm-image",
 				},
 				Spec: XfrmPodSpec{
@@ -421,7 +421,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 		Meta: PodMeta{
 			Name:      "proxy-pod-node1",
 			Namespace: "ipman-system",
-			Node:      "node1",
+			NodeName:  "node1",
 			Image:     "proxy-image",
 		},
 		Spec: ProxyPodSpec{},
@@ -594,7 +594,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -605,7 +605,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -622,7 +622,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -638,7 +638,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -655,7 +655,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "new-image",
 				},
 				Spec: CharonPodSpec{
@@ -666,7 +666,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "test-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "old-image",
 				},
 				Spec: CharonPodSpec{
@@ -685,7 +685,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "new-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -696,7 +696,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "old-namespace",
-					Node:      "test-node",
+					NodeName:  "test-node",
 					Image:     "test-image",
 				},
 				Spec: CharonPodSpec{
@@ -715,7 +715,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "new-namespace",
-					Node:      "new-node",
+					NodeName:  "new-node",
 					Image:     "new-image",
 				},
 				Spec: CharonPodSpec{
@@ -726,7 +726,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 				Meta: PodMeta{
 					Name:      "test-pod",
 					Namespace: "old-namespace",
-					Node:      "old-node",
+					NodeName:  "old-node",
 					Image:     "old-image",
 				},
 				Spec: CharonPodSpec{
