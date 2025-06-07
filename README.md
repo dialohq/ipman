@@ -149,7 +149,14 @@ If you encounter issues with your IPSec connections:
    ```
 
 3. Verify pod annotations match the IPSecConnection configuration
+## Architecture
+![image](https://github.com/user-attachments/assets/62ac06dd-8319-432c-9512-c3eebcb54b4d)
 
+### Description
+IPMan operates by running an instance of Charon (StrongSwan’s IKE daemon) on a user-specified node. On that same node, a pod is created for each child connection defined in the IPSec configuration. Each of these pods is equipped with an XFRM interface.
+In addition to the XFRM interface, a VXLAN interface is also set up inside these pods. Incoming traffic from the remote site is routed through the XFRM interface and into the VXLAN. The other end of this VXLAN is injected into the target workload pods, allowing them to communicate securely.
+This design ensures that the only publicly exposed ports are 500 and 4500, which are required for IKE and IPSec traffic handled by Charon.
+To facilitate internal communication, a proxy pod is also deployed. It acts as a REST API gateway between pods. This allows Charon to operate within the host network namespace without occupying additional host ports unnecessarily.
 
 ## License
 
