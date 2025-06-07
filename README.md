@@ -16,6 +16,8 @@ IPMan is a Kubernetes operator that simplifies the management of IPSec connectio
 
 - Kubernetes cluster 1.20+
 - Helm 3.0+
+- Linux kernel XFRM module
+- A CNI plugin that supports inter-node pod-to-pod communication (e.g., Calico, Cilium)
 
 ### Installing with Helm
 
