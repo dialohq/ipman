@@ -1,5 +1,5 @@
 # IPMan - IPSec Connection Manager for Kubernetes
-
+[Logo](./docs/logo.png)
 IPMan is a Kubernetes operator that simplifies the management of IPSec connections, enabling secure communication between your Kubernetes workloads and the outside world. It automates the setup and configuration of IPSec VPN tunnels using StrongSwan, making it easy to expose pods to external networks securely.
 
 ## What IPMan Does
