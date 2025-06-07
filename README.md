@@ -148,3 +148,8 @@ If you encounter issues with your IPSec connections:
    ```
 
 3. Verify pod annotations match the IPSecConnection configuration
+
+
+## License
+
+This project is licensed under the [MIT License](./LICENSE).
