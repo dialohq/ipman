@@ -15,6 +15,7 @@ import (
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -500,12 +501,38 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection 
 		t, _ := time.Parse(time.Layout, v)
 		sortedPending = append(sortedPending, t.Add(time.Second*ipmanv1.ReconcilerPendingIPsTimeoutSeconds).Sub(time.Now()))
 	}
+	var requeueIn *time.Duration
 	if len(sortedPending) == 0 {
-		return nil, nil
+		requeueIn = nil
+	} else {
+		min := slices.Min(sortedPending)
+		requeueIn = &min
 	}
-	requeueIn := slices.Min(sortedPending)
 
-	return &requeueIn, nil
+	nodelist := &corev1.NodeList{}
+	err = r.List(ctx, nodelist)
+	if err != nil {
+		logger.Error(err, "Couldn't list nodes")
+		return requeueIn, err
+	}
+	for _, node := range nodelist.Items {
+		if node.GetLabels()["kubernetes.io/hostname"] == ipsecconnection.Spec.NodeName {
+			charonPod := &corev1.Pod{}
+			nsn := types.NamespacedName{
+				Name:      ipmanv1.ProxyPodName + "-" + node.Status.NodeInfo.MachineID,
+				Namespace: r.Env.NamespaceName,
+			}
+			err = r.Get(ctx, nsn, charonPod)
+			if err != nil {
+				if apierrors.IsNotFound(err) {
+					return requeueIn, nil
+				}
+				return nil, fmt.Errorf("Couldn't get charon pod: %w", err)
+			}
+			ipsecconnection.Status.CharonProxyIP = charonPod.Status.PodIP
+		}
+	}
+	return requeueIn, nil
 }
 
 // CreateXfrms creates Xfrm pod specifications for each child in the given IPSecConnections
