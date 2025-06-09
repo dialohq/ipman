@@ -155,11 +155,8 @@ If you encounter issues with your IPSec connections:
 ![image](https://github.com/user-attachments/assets/62ac06dd-8319-432c-9512-c3eebcb54b4d)
 
 ### Description
-IPMan operates by running an instance of Charon (StrongSwan’s IKE daemon) on a user-specified node. On that same node, a pod is created for each child connection defined in the IPSec configuration. Each of these pods is equipped with an XFRM interface.
-In addition to the XFRM interface, a VXLAN interface is also set up inside these pods. Incoming traffic from the remote site is routed through the XFRM interface and into the VXLAN. The other end of this VXLAN is injected into the target workload pods, allowing them to communicate securely.
-This design ensures that the only publicly exposed ports are 500 and 4500, which are required for IKE and IPSec traffic handled by Charon.
-To facilitate internal communication, a proxy pod is also deployed. It acts as a REST API gateway between pods, enabling components to interact with Charon, which must run in the host network namespace. Instead of using TCP ports, the proxy communicates with Charon over a Unix domain socket, which avoids consuming any ports on the host. This design keeps the public exposure limited strictly to ports 500 and 4500 for IKE and IPSec traffic.
-
+IPMan ensures secure connectivity between remote sites and workload pods by injecting secondary interfaces tied to the local encryption domain's network. Inbound traffic arrives at the host’s network interface, is forwarded through a dedicated XFRM interface, and routed within an isolated VXLAN segment for enhanced security and segmentation.
+Charon, the IKE daemon from StrongSwan, operates on user-specified nodes, with instance counts driven by the IPsec configuration. Each child connection runs in a dedicated pod, equipped with its own XFRM interface and VXLAN segment. This design enables flexible workload deployment across the cluster, abstracting the underlying physical infrastructure for seamless scalability. Only ports 500 (IKE) and 4500 (NAT-traversal/IPsec) are exposed for secure communication. Charon and the restctl service, which manage the Charon socket and XFRM interface configuration, operate within the host network namespace, exposing only sockets mounted in the host filesystem. Control sockets, accessible via proxies, facilitate cluster-wide management without requiring additional open ports.
 
 ## License
 
