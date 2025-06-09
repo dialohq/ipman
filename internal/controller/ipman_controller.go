@@ -32,18 +32,19 @@ import (
 
 // Envs holds environment configuration values for the IPSec controller
 type Envs struct {
-	NamespaceName          string
-	HostSocketsPath        string
-	XfrminionImage         string
-	XfrminionPullPolicy    string
-	CharonDaemonImage      string
-	CharonDaemonPullPolicy string
-	VxlandlordImage        string
-	RestctlImage           string
-	RestctlPullPolicy      string
-	CaddyImage             string
-	CaddyProxyPullPolicy   string
-	IsTest                 bool
+	NamespaceName            string
+	HostSocketsPath          string
+	XfrminionImage           string
+	XfrminionPullPolicy      string
+	CharonDaemonImage        string
+	CharonDaemonPullPolicy   string
+	VxlandlordImage          string
+	RestctlImage             string
+	RestctlPullPolicy        string
+	CaddyImage               string
+	CaddyProxyPullPolicy     string
+	IsTest                   bool
+	WaitForPodTimeoutSeconds int64
 }
 
 // IPSecConnectionReconciler reconciles IPSecConnection resources

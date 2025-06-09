@@ -60,6 +60,8 @@ spec:
               value: {{ .Values.restctl.pullPolicy }}
             - name: PROXY_PULL_POLICY
               value: {{ .Values.caddy.pullPolicy }}
+            - name: POD_WAIT_TIMEOUT
+              value: "{{ .Values.controller.podTimeoutSeconds }}"
 
           volumeMounts:
           - name: {{ .Values.webhook.volumes.name }}

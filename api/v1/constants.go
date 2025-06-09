@@ -8,8 +8,6 @@ const (
 	// WebhookServerCertDir is the directory path for webhook server certificates
 	WebhookServerCertDir = "/etc/webhook/certs"
 
-	// WaitForPodReadyMaxRetries is the maximum number of retries to check pod readiness
-	WaitForPodReadyMaxRetries = 30
 	// DeletePodMaxRetries is the maximum number of retries for pod deletion
 	DeletePodMaxRetries = 5
 	// UpdateStatusMaxRetries is the maximuma number of times controller will try to

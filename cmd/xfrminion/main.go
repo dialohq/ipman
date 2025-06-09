@@ -53,6 +53,11 @@ func addBridgeFDB(w http.ResponseWriter, r *http.Request) {
 			link = &links[i]
 		}
 	}
+	if link == nil {
+		logger.Error("Fatal error, couldn't find vxlan interface. List of interfaces: ", "links", links)
+		writeError(w, err, nil)
+		os.Exit(1)
+	}
 
 	cmd := exec.Command("bridge", "fdb", "append", "00:00:00:00:00:00", "dev", (*link).Attrs().Name, "dst", bfr.CiliumIP)
 	if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
@@ -261,6 +266,12 @@ func addRemoteRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if link == nil {
+		logger.Error("Fatal error, couldn't find vxlan interface. List of interfaces: ", "links", links)
+		writeError(w, err, nil)
+		os.Exit(1)
+	}
+
 	_, ipnet, err := net.ParseCIDR(rrr.RemoteIP)
 	if err != nil {
 		logger.Error("Error parsing vxlan ip as CIDR after bridge fdb append", "msg", err)
@@ -314,6 +325,11 @@ func deleteRemoteRoute(w http.ResponseWriter, r *http.Request) {
 		if l.Type() == "xfrm" {
 			link = &links[i]
 		}
+	}
+	if link == nil {
+		logger.Info("Fatal error: Couldn't find xfrm interface", "links", links)
+		writeError(w, err, nil)
+		os.Exit(1)
 	}
 
 	_, ipnet, err := net.ParseCIDR(rrr.RemoteIP)

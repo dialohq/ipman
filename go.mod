@@ -5,7 +5,6 @@ go 1.24.1
 require (
 	github.com/jrhouston/k8slock v0.2.0
 	github.com/kr/pretty v0.3.1
-	github.com/prometheus-community/pro-bing v0.7.0
 	github.com/r3labs/diff/v3 v3.0.1
 	github.com/stretchr/testify v1.9.0
 	github.com/vishvananda/netlink v1.3.0

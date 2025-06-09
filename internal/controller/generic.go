@@ -30,12 +30,12 @@ func (r *IPSecConnectionReconciler) waitForPodReady(nsn types.NamespacedName) (*
 	logger := log.FromContext(ctx, "awaited-pod", nsn.String())
 	pod := &corev1.Pod{}
 	err := r.Get(ctx, nsn, pod)
-	tries := 1
-	if err != nil {
+	tries := int64(1)
+	if err != nil && !apierrors.IsNotFound(err) {
 		logger.Info(
 			"Error waiting for pod to go into 'Running' state",
 			"error", err,
-			"tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries),
+			"tries", fmt.Sprintf("%d/%d", tries, r.Env.WaitForPodTimeoutSeconds),
 		)
 		tries += 1
 	}
@@ -44,18 +44,18 @@ func (r *IPSecConnectionReconciler) waitForPodReady(nsn types.NamespacedName) (*
 		return pod, nil
 	}
 	for pod.Status.Phase != "Running" {
-		if tries > ipmanv1.WaitForPodReadyMaxRetries {
-			return nil, fmt.Errorf("Timeout waiting for pod to go into state 'Running' after %d tries", ipmanv1.WaitForPodReadyMaxRetries)
+		if tries > r.Env.WaitForPodTimeoutSeconds {
+			return nil, fmt.Errorf("Timeout waiting for pod to go into state 'Running' after %d tries", r.Env.WaitForPodTimeoutSeconds)
 		}
 		err := r.Get(ctx, nsn, pod)
-		if err != nil {
+		if err != nil && !apierrors.IsNotFound(err) {
 			logger.Info(
 				"Error waiting for pod to go into 'Running' state",
 				"error", err,
-				"tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries),
+				"tries", fmt.Sprintf("%d/%d", tries, r.Env.WaitForPodTimeoutSeconds),
 			)
 		} else {
-			logger.Info("Waiting", "phase", pod.Status.Phase, "tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries))
+			logger.Info("Waiting", "phase", pod.Status.Phase, "tries", fmt.Sprintf("%d/%d", tries, r.Env.WaitForPodTimeoutSeconds))
 		}
 		time.Sleep(1 * time.Second)
 		tries++
@@ -63,18 +63,18 @@ func (r *IPSecConnectionReconciler) waitForPodReady(nsn types.NamespacedName) (*
 
 	tries = 1
 	for pod.Status.PodIP == "" {
-		if tries > ipmanv1.WaitForPodReadyMaxRetries {
-			return nil, fmt.Errorf("Timeout waiting for pod to get assigned IP after %d tries", ipmanv1.WaitForPodReadyMaxRetries)
+		if tries > r.Env.WaitForPodTimeoutSeconds {
+			return nil, fmt.Errorf("Timeout waiting for pod to get assigned IP after %d tries", r.Env.WaitForPodTimeoutSeconds)
 		}
 		err := r.Get(ctx, nsn, pod)
 		if err != nil {
 			logger.Info(
 				"Error waiting for pod to get assigned ip",
 				"error", err,
-				"tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries),
+				"tries", fmt.Sprintf("%d/%d", tries, r.Env.WaitForPodTimeoutSeconds),
 			)
 		} else {
-			logger.Info("Waiting", "phase", pod.Status.Phase, "tries", fmt.Sprintf("%d/%d", tries, ipmanv1.WaitForPodReadyMaxRetries))
+			logger.Info("Waiting", "phase", pod.Status.Phase, "tries", fmt.Sprintf("%d/%d", tries, r.Env.WaitForPodTimeoutSeconds))
 		}
 		time.Sleep(1 * time.Second)
 		tries++
