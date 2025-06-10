@@ -3,18 +3,16 @@ package controller
 import (
 	"context"
 	"fmt"
-	"io"
-	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
-	"dialo.ai/ipman/pkg/comms"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
 
 // ProxyPodSpec defines the specification for a Proxy pod
 type ProxyPodSpec struct {
-	HostPath string `json:"host_path" diff:"host_path"`
+	HostPath string                        `json:"host_path" diff:"host_path"`
+	Configs  []ipmanv1.IPSecConnectionSpec `json:"configs" diff:"configs"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for ProxyPodSpec
@@ -72,24 +70,6 @@ func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Po
 	pod, err = r.waitForPodReady(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
 	if err != nil {
 		return err
-	}
-	serializedConf := ipmanv1.SerializeAllToConf(cdl)
-	url := "http://" + pod.Status.PodIP + "/reload"
-	data := &comms.ReloadData{
-		SerializedConfig: serializedConf,
-	}
-	resp, err := comms.SendPost(url, data)
-	for i := 0; err != nil && i < 3; i++ {
-		time.Sleep(time.Second / 2)
-		resp, err = comms.SendPost(url, data)
-	}
-	if err != nil {
-		return fmt.Errorf("Couldn't send request to reload charon pod: %w", err)
-	}
-	defer resp.Body.Close()
-	out, err := io.ReadAll(resp.Body)
-	if resp.StatusCode != 200 {
-		return fmt.Errorf("Error reloading charon pod, status code not 200: %d, %s", resp.StatusCode, string(out))
 	}
 
 	byNode := groupConnsByNode(list.Items)

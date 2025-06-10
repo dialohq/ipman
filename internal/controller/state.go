@@ -46,7 +46,6 @@ func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 			Labels: map[string]string{
 				ipmanv1.LabelPodType: typeLabel,
 			},
-			OwnerReferences: []metav1.OwnerReference{},
 		},
 	}
 	an, _ := json.Marshal(p.Spec)
@@ -76,10 +75,6 @@ type Routes struct {
 	Remote    []string    `json:"remote_routes" diff:"remote_routes"`
 	BridgeFDB LocalRoutes `json:"bridge_fdb" diff:"bridge_fdb"`
 }
-type Owner struct {
-	UID  string `json:"UID" diff:"UID"`
-	Name string `json:"name" diff:"name"`
-}
 
 // PodMeta contains metadata for IPMan pods
 type PodMeta struct {
@@ -89,7 +84,6 @@ type PodMeta struct {
 	NodeName  string `json:"node" diff:"node"`
 	NodeID    string `json:"node_id" diff:"node_id"`
 	Image     string `json:"image" diff:"image"`
-	Owner     Owner  `json:"owner" diff:"owner"`
 }
 
 // NodeState represents the state of all IPMan pods on a specific node

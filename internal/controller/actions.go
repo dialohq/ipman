@@ -288,3 +288,72 @@ func (a *DeleteBridgeFDBAction) Do(ctx context.Context, r *IPSecConnectionReconc
 	delete(x.Spec.Routes.BridgeFDB, a.VxlanIP)
 	return updateXfrmSpecAnnotation(x, r)
 }
+
+type OverrideConfigAction struct {
+	PodName string                    `json:"pod_name" diff:"pod_name"`
+	Configs []ipmanv1.IPSecConnection `json:"configs" diff:"configs"`
+}
+
+func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
+	pod := corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: a.PodName}, &pod)
+	if err != nil {
+		return fmt.Errorf("Couldn't get pod %s: %w", a.PodName, err)
+	}
+	secrets := map[string]string{}
+	for _, conn := range a.Configs {
+		if conn.Spec.NodeName == pod.Spec.NodeName {
+			sec := &corev1.Secret{}
+			err := r.Get(context.Background(), types.NamespacedName{Name: conn.Spec.SecretRef.Name, Namespace: conn.Spec.SecretRef.Namespace}, sec)
+			if err != nil {
+				return fmt.Errorf("Couldn't get secret for connection %s: %w", conn.Name, err)
+			}
+			secrets[conn.Name] = string(sec.Data[conn.Spec.SecretRef.Key])
+			if secrets[conn.Name] == "" {
+				return fmt.Errorf("Error, empty secret for connection %s", conn.Name)
+			}
+		}
+	}
+	d := []ipmanv1.ConnData{}
+	for _, c := range a.Configs {
+		if c.Spec.NodeName == pod.Spec.NodeName {
+			d = append(d, ipmanv1.ConnData{
+				Secret:          secrets[c.Name],
+				IPSecConnection: c,
+			})
+		}
+	}
+	finalConfig := ipmanv1.SerializeAllToConf(d)
+	url := fmt.Sprintf("http://%s/reload", pod.Status.PodIP)
+
+	data := comms.ReloadData{
+		SerializedConfig: finalConfig,
+	}
+	resp, err := comms.SendPost(url, data)
+	if err != nil {
+		return fmt.Errorf("Error sending post to reload charon pod %s: %w", a.PodName, err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Error requesting reload of strongswan config on pod %s: %w", a.PodName, err)
+	}
+	spec := ProxyPodSpec{}
+	err = json.Unmarshal([]byte(pod.Annotations[ipmanv1.AnnotationSpec]), &spec)
+	if err != nil {
+		return fmt.Errorf("Couldn't unmarshal spec: %w", err)
+	}
+	connSpecs := []ipmanv1.IPSecConnectionSpec{}
+	for _, s := range a.Configs {
+		connSpecs = append(connSpecs, s.Spec)
+	}
+	spec.Configs = connSpecs
+	out, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("Coulnd't marshal spec")
+	}
+	pod.Annotations[ipmanv1.AnnotationSpec] = string(out)
+	err = r.Update(ctx, &pod)
+	if err != nil {
+		return fmt.Errorf("Couldn't update annotations of pod %s: %w", pod.Name, err)
+	}
+	return nil
+}

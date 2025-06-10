@@ -150,9 +150,16 @@ func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
 
 // ProxyFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
 func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
+	cs := ProxyPodSpec{}
+	err := json.Unmarshal([]byte(p.Annotations[ipmanv1.AnnotationSpec]), &cs)
+	if err != nil {
+		logger := log.FromContext(context.Background())
+		logger.Error(err, "Couldn't unmarshal spec annotation of proxy pod")
+	}
 	return IpmanPod[ProxyPodSpec]{
 		Spec: ProxyPodSpec{
 			HostPath: ExtractCharonVolumeSocketPath(p),
+			Configs:  cs.Configs,
 		},
 		Meta: PodMeta{
 			Name:      p.Name,
@@ -377,18 +384,28 @@ func (r *IPSecConnectionReconciler) GetNodeID(name string) (string, error) {
 // CreateCharons creates Charon pod specifications for the given IPSecConnections
 func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection, nodes map[string]NodeInfo) []IpmanPod[CharonPodSpec] {
 	chs := []IpmanPod[CharonPodSpec]{}
-	for _, c := range cl {
-		ch := IpmanPod[CharonPodSpec]{}
-		ch.Meta = PodMeta{
-			NodeName:  c.Spec.NodeName,
-			Name:      strings.Join([]string{ipmanv1.CharonPodName, nodes[c.Spec.NodeName].ID}, "-"),
-			Namespace: r.Env.NamespaceName,
-			Image:     r.Env.CharonDaemonImage,
+	for name, info := range nodes {
+		found := false
+		for _, c := range cl {
+			if c.Spec.NodeName == name {
+				found = true
+				break
+			}
 		}
-		ch.Spec = CharonPodSpec{
-			HostPath: r.Env.HostSocketsPath,
+		if found {
+			ch := IpmanPod[CharonPodSpec]{}
+			ch.Meta = PodMeta{
+				NodeName:  name,
+				NodeID:    info.ID,
+				Name:      strings.Join([]string{ipmanv1.CharonPodName, info.ID}, "-"),
+				Namespace: r.Env.NamespaceName,
+				Image:     r.Env.CharonDaemonImage,
+			}
+			ch.Spec = CharonPodSpec{
+				HostPath: r.Env.HostSocketsPath,
+			}
+			chs = append(chs, ch)
 		}
-		chs = append(chs, ch)
 	}
 	return chs
 }
@@ -396,16 +413,32 @@ func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection, 
 // CreateProxies creates Proxy pod specifications for the given IPSecConnections
 func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection, nodes map[string]NodeInfo) []IpmanPod[ProxyPodSpec] {
 	prxs := []IpmanPod[ProxyPodSpec]{}
-	for _, c := range cl {
+	for name, info := range nodes {
+		configs := []ipmanv1.IPSecConnection{}
+		for _, c := range cl {
+			if c.Spec.NodeName == name {
+				configs = append(configs, c)
+			}
+		}
+		if len(configs) == 0 {
+			return []IpmanPod[ProxyPodSpec]{}
+		}
+
 		prx := IpmanPod[ProxyPodSpec]{}
+		specs := []ipmanv1.IPSecConnectionSpec{}
+		for _, cfg := range configs {
+			specs = append(specs, cfg.Spec)
+		}
 		prx.Meta = PodMeta{
-			NodeName:  c.Spec.NodeName,
-			Name:      strings.Join([]string{ipmanv1.ProxyPodName, nodes[c.Spec.NodeName].ID}, "-"),
+			NodeName:  name,
+			NodeID:    info.ID,
+			Name:      strings.Join([]string{ipmanv1.ProxyPodName, info.ID}, "-"),
 			Namespace: r.Env.NamespaceName,
 			Image:     r.Env.CaddyImage,
 		}
 		prx.Spec = ProxyPodSpec{
-			r.Env.HostSocketsPath,
+			HostPath: r.Env.HostSocketsPath,
+			Configs:  specs,
 		}
 		prxs = append(prxs, prx)
 	}
@@ -677,14 +710,8 @@ func comparePods[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *IpmanPod[S
 
 	metaEqual := desired.Meta.Name == current.Meta.Name &&
 		desired.Meta.Namespace == current.Meta.Namespace &&
-		desired.Meta.NodeName == current.Meta.NodeName &&
-		(desired.Meta.Image == "" || current.Meta.Image == "" || desired.Meta.Image == current.Meta.Image) &&
-		desired.Meta.Owner.UID == current.Meta.Owner.UID &&
-		desired.Meta.Owner.Name == current.Meta.Owner.Name
-
-	specEqual := reflect.DeepEqual(desired.Spec, current.Spec)
-
-	return metaEqual && specEqual
+		desired.Meta.NodeName == current.Meta.NodeName
+	return metaEqual
 }
 
 func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *IpmanPod[Spec]) []Action {
@@ -707,11 +734,38 @@ func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *Ipman
 	return []Action{}
 }
 
-func diffCharon(desired *IpmanPod[CharonPodSpec], current *IpmanPod[CharonPodSpec]) []Action {
-	return diffImmutablePod(desired, current)
+func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[ProxyPodSpec], current *IpmanPod[ProxyPodSpec], conns []ipmanv1.IPSecConnection) ([]Action, error) {
+	if desired == nil {
+		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}}, nil
+	}
+
+	connsPerNode := []ipmanv1.IPSecConnection{}
+	for _, c := range conns {
+		if c.Spec.NodeName == desired.Meta.NodeName {
+			connsPerNode = append(connsPerNode, c)
+		}
+	}
+	if current == nil {
+		return []Action{&CreatePodAction[ProxyPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerNode}}, nil
+	}
+
+	sameMeta := comparePods(desired, current)
+	if !sameMeta {
+		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}, &CreatePodAction[ProxyPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerNode}}, nil
+	}
+	slices.SortFunc(desired.Spec.Configs, func(a, b ipmanv1.IPSecConnectionSpec) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	slices.SortFunc(current.Spec.Configs, func(a, b ipmanv1.IPSecConnectionSpec) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	if !reflect.DeepEqual(desired.Spec.Configs, current.Spec.Configs) {
+		return []Action{&OverrideConfigAction{PodName: current.Meta.Name, Configs: connsPerNode}}, nil
+	}
+	return []Action{}, nil
 }
 
-func diffProxy(desired *IpmanPod[ProxyPodSpec], current *IpmanPod[ProxyPodSpec]) []Action {
+func diffCharon(desired *IpmanPod[CharonPodSpec], current *IpmanPod[CharonPodSpec]) []Action {
 	return diffImmutablePod(desired, current)
 }
 
@@ -899,10 +953,7 @@ func compareXfrmPods(a, b IpmanPod[XfrmPodSpec]) bool {
 
 	metaEqual := a.Meta.Name == b.Meta.Name &&
 		a.Meta.Namespace == b.Meta.Namespace &&
-		a.Meta.NodeName == b.Meta.NodeName &&
-		(a.Meta.Image == "" || b.Meta.Image == "" || a.Meta.Image == b.Meta.Image) &&
-		a.Meta.Owner.UID == b.Meta.Owner.UID &&
-		a.Meta.Owner.Name == b.Meta.Owner.Name
+		a.Meta.NodeName == b.Meta.NodeName
 
 	propsEqual := a.Spec.Props.OwnerChild == b.Spec.Props.OwnerChild &&
 		a.Spec.Props.OwnerConnection == b.Spec.Props.OwnerConnection &&
@@ -1029,10 +1080,7 @@ func deleteNode(ns *NodeState) []Action {
 }
 
 // DiffStates compares desired and current cluster states and returns actions needed to reconcile them
-func DiffStates(desired *ClusterState, current *ClusterState) []Action {
-	if reflect.DeepEqual(desired, current) {
-		return nil
-	}
+func (r *IPSecConnectionReconciler) DiffStates(desired *ClusterState, current *ClusterState, conns []ipmanv1.IPSecConnection) ([]Action, error) {
 	acts := []Action{}
 	for _, ns := range desired.Nodes {
 		idx, found := findNode(ns.NodeName, current)
@@ -1042,14 +1090,16 @@ func DiffStates(desired *ClusterState, current *ClusterState) []Action {
 		}
 
 		if !reflect.DeepEqual(ns, current.Nodes[idx]) {
-
 			if !reflect.DeepEqual(ns.Charon, current.Nodes[idx].Charon) {
 				charonActions := diffCharon(ns.Charon, current.Nodes[idx].Charon)
 				acts = append(acts, charonActions...)
 			}
 
 			if !reflect.DeepEqual(ns.Proxy, current.Nodes[idx].Proxy) {
-				proxyActions := diffProxy(ns.Proxy, current.Nodes[idx].Proxy)
+				proxyActions, err := r.diffProxy(ns.Proxy, current.Nodes[idx].Proxy, conns)
+				if err != nil {
+					return nil, err
+				}
 				acts = append(acts, proxyActions...)
 			}
 
@@ -1067,7 +1117,7 @@ func DiffStates(desired *ClusterState, current *ClusterState) []Action {
 		}
 	}
 
-	return acts
+	return acts, nil
 }
 
 func res(rq *time.Duration, times ...time.Duration) ctrl.Result {
@@ -1150,12 +1200,22 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		return res(rq, time.Duration(time.Second*3)), err
 	}
 
-	actions := DiffStates(desiredState, currentState)
+	cl := &ipmanv1.IPSecConnectionList{}
+	err = r.List(ctx, cl)
+	if err != nil {
+		return res(rq), fmt.Errorf("Couldn't list ipmen: %w", err)
+	}
+
+	actions, err := r.DiffStates(desiredState, currentState, cl.Items)
+	if err != nil {
+		return res(rq), fmt.Errorf("Error diffing states: %w", err)
+	}
 	actionTypes := []string{}
 	for _, a := range actions {
 		actionTypes = append(actionTypes, reflect.TypeOf(a).String())
 	}
 	for _, a := range actions {
+		logger.Info("Doing action", "type", reflect.TypeOf(a))
 		err = a.Do(ctx, r)
 		if err != nil {
 			logger.Info("Error executing action", "action", a, "msg", err)

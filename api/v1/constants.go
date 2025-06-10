@@ -3,6 +3,8 @@ package v1
 // Constants for ipman v1 API resources.
 // This block defines annotation keys, label values, and server configuration constants.
 const (
+	ApiVersion = "ipman.dialo.ai/v1"
+	Kind       = "IPSecConnection"
 	// WebhookServerPort is the port used by the webhook server
 	WebhookServerPort = 8443
 	// WebhookServerCertDir is the directory path for webhook server certificates
