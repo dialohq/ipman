@@ -665,6 +665,9 @@ func (r *IPSecConnectionReconciler) CreateWorkers(ctx context.Context) (map[stri
 	//
 	ws := map[string]map[string][]Worker{}
 	for _, p := range ps.Items {
+		if p.Status.PodIP == "" {
+			continue
+		}
 		podChn := p.Labels[ipmanv1.LabelWorker]
 		podCon := p.Annotations[ipmanv1.AnnotationIpmanName]
 		if _, ok := ws[podCon]; !ok {
@@ -1219,6 +1222,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		err = a.Do(ctx, r)
 		if err != nil {
 			logger.Info("Error executing action", "action", a, "msg", err)
+			return res(rq, time.Duration(5*time.Second)), nil
 		}
 	}
 

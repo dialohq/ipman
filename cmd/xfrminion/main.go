@@ -18,7 +18,6 @@ import (
 	"dialo.ai/ipman/pkg/comms"
 	"dialo.ai/ipman/pkg/netconfig"
 	u "dialo.ai/ipman/pkg/utils"
-	// "github.com/mdlayher/arp"
 	ip "github.com/vishvananda/netlink"
 )
 
