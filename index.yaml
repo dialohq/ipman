@@ -3,12 +3,12 @@ entries:
   ipman:
   - apiVersion: v2
     appVersion: 1.16.0
-    created: "2025-06-09T12:26:52.447983Z"
+    created: "2025-06-10T12:55:17.537626+02:00"
     description: IPSec connection manager
-    digest: d6ac47403daa23f8e4938164437941b8519dfaa89b37cffa2e07c92e357f0525
+    digest: 81e1899ae567a7b6ef6c5a8a8879f0360c04be50b37b4fc938714546776c023e
     name: ipman
     type: application
     urls:
-    - https://github.com/dialohq/ipman/releases/download/v0.1.4/ipman-0.1.4.tgz
-    version: 0.1.4
-generated: "2025-06-09T12:26:52.445206Z"
+    - https://github.com/dialohq/ipman/releases/download/v0.1.5/ipman-0.1.5.tgz
+    version: 0.1.5
+generated: "2025-06-10T12:55:17.536879+02:00"
