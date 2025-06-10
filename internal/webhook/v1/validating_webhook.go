@@ -56,22 +56,21 @@ func writeResponseDenied(w http.ResponseWriter, in *admissionv1.AdmissionReview,
 	w.Write(rjson)
 }
 
-func validateIPSecConnectionDeletion(req *admissionv1.AdmissionRequest, workers []corev1.Pod, xfrm []corev1.Pod) (bool, error) {
+func validateIPSecConnectionDeletion(req *admissionv1.AdmissionRequest, workers []corev1.Pod) (bool, error) {
 	ipsecconnection := &ipmanv1.IPSecConnection{}
 	err := json.Unmarshal(req.OldObject.Raw, ipsecconnection)
 	if err != nil {
 		return false, fmt.Errorf("Couldn't unmarshal ipsecconnection: %w", err)
 	}
 
-	for _, p := range xfrm {
-		if _, ok := ipsecconnection.Spec.Children[p.Annotations["ipman.dialo.ai/childName"]]; ok {
-			if !canDeleteXfrm(&p, workers) {
-				podNames := []string{}
-				for _, pod := range workers {
-					podNames = append(podNames, pod.Name)
-				}
-				return false, fmt.Errorf("Worker pods use xfrm that belongs to this ipsecconnection: %v", podNames)
-			}
+	for _, p := range workers {
+		cn, exists := p.Annotations[ipmanv1.AnnotationChildName]
+		if !exists {
+			continue
+		}
+		if _, ok := ipsecconnection.Spec.Children[cn]; ok {
+			fmt.Println("Annotation exists on pod: ", p.Name)
+			return false, fmt.Errorf("Worker pods use xfrm that belongs to this ipsecconnection: %v", types.NamespacedName{Name: p.Name, Namespace: p.Namespace})
 		}
 	}
 
@@ -318,8 +317,7 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 		verdict, err = validateIPSecConnectionCreation(*newIPSecConnection, ipsecconnections.Items, allPods.Items)
 
 	case deletionAction:
-		xfrmPods := extractXfrmPods(allPods.Items, wh.Env.NamespaceName)
-		verdict, err = validateIPSecConnectionDeletion(in.Request, allPods.Items, xfrmPods)
+		verdict, err = validateIPSecConnectionDeletion(in.Request, allPods.Items)
 
 	case updateAction:
 		old := ipmanv1.IPSecConnection{}
