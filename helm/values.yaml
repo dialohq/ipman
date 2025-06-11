@@ -8,7 +8,7 @@ global:
 controller:
   podTimeoutSeconds: 60
   replicaCount: 1
-  image: "plan9better/operator:0.1.7"
+  image: "plan9better/operator:0.1.8"
   pullPolicy: IfNotPresent
   podSecurityContext:
     runAsNonRoot: true
@@ -29,19 +29,19 @@ caddy:
   pullPolicy: "IfNotPresent"
 # Restctl service configuration
 restctl:
-  image: "plan9better/restctl:0.1.7"
+  image: "plan9better/restctl:0.1.8"
   pullPolicy: "IfNotPresent"
 # VxlanLord configuration
 vxlandlord:
-  image: "plan9better/vxlandlord:0.1.7"
+  image: "plan9better/vxlandlord:0.1.8"
   pullPolicy: "IfNotPresent"
 # XfrmMinion configuration
 xfrminion:
-  image: "plan9better/xfrminion:0.1.7"
+  image: "plan9better/xfrminion:0.1.8"
   pullPolicy: "IfNotPresent"
 # Charon daemon configuration
 charon:
-  image: "plan9better/charon:0.1.7"
+  image: "plan9better/charon:0.1.8"
   pullPolicy: "IfNotPresent"
 # Webhook configuration
 webhook:

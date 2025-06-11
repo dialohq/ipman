@@ -60,14 +60,12 @@ func SerializeAllToConf(data []ConnData) string {
 		secrets += fmt.Sprintf(`
 	ike-%s {
 		secret = "%s"
-		local-id = %s
-		remote-id = %s
+		id = %s
 	}
 `,
 			d.IPSecConnection.Spec.SecretRef.Key,
 			strings.Trim(d.Secret, " \n\t"),
-			d.IPSecConnection.Spec.LocalId,
-			d.IPSecConnection.Spec.RemoteId)
+			d.IPSecConnection.Spec.RemoteAddr)
 	}
 
 	return fmt.Sprintf(`
