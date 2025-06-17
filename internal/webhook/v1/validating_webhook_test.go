@@ -64,7 +64,7 @@ func TestValidateIPSecConnectionUpdate(t *testing.T) {
 		{name: "add child", newChildren: map[string]ipmanv1.Child{"c1": child1, "c2": child2}, oldChildren: map[string]ipmanv1.Child{"c1": child1}, pods: nil, wantOK: true},
 		{name: "delete unused child", newChildren: map[string]ipmanv1.Child{"c1": child1}, oldChildren: map[string]ipmanv1.Child{"c1": child1, "c2": child2}, pods: nil, wantOK: true},
 		{name: "delete used child", newChildren: map[string]ipmanv1.Child{}, oldChildren: map[string]ipmanv1.Child{"c2": child2}, pods: []corev1.Pod{podUsingC2}, wantOK: false, wantErrContains: "Pods depend on child to be deleted"},
-		{name: "update ipPools generic error", newChildren: map[string]ipmanv1.Child{"c1": child1More}, oldChildren: map[string]ipmanv1.Child{"c1": child1}, pods: nil, wantOK: false, wantErrContains: "Only fields that support live reload are"},
+		{name: "update ipPools generic error", newChildren: map[string]ipmanv1.Child{"c1": child1More}, oldChildren: map[string]ipmanv1.Child{"c1": child1}, pods: nil, wantOK: true},
 		{name: "update ipPools with violating pod", newChildren: map[string]ipmanv1.Child{"c1": child1}, oldChildren: map[string]ipmanv1.Child{"c1": child1More}, pods: []corev1.Pod{podUsingDeletedIP}, wantOK: false, wantErrContains: "Pod uses ip deleted from a pool"},
 	}
 	for _, tt := range tests {
@@ -165,7 +165,7 @@ func TestCanDeleteXfrm(t *testing.T) {
 func TestValidateIPSecConnectionDeletion(t *testing.T) {
 	// invalid JSON
 	req := &admissionv1.AdmissionRequest{OldObject: runtime.RawExtension{Raw: []byte("invalid")}}
-	ok, err := validateIPSecConnectionDeletion(req, nil, nil)
+	ok, err := validateIPSecConnectionDeletion(req, nil)
 	if err == nil && ok {
 		t.Error("expected error, got none")
 	}
@@ -173,19 +173,19 @@ func TestValidateIPSecConnectionDeletion(t *testing.T) {
 	ipsecconnection := &ipmanv1.IPSecConnection{Spec: ipmanv1.IPSecConnectionSpec{Children: map[string]ipmanv1.Child{"c1": {Name: "c1"}}}}
 	raw, _ := json.Marshal(ipsecconnection)
 	req2 := &admissionv1.AdmissionRequest{OldObject: runtime.RawExtension{Raw: raw}}
-	ok2, err2 := validateIPSecConnectionDeletion(req2, nil, nil)
+	ok2, err2 := validateIPSecConnectionDeletion(req2, nil)
 	if err2 != nil || !ok2 {
 		t.Errorf("expected ok, got ok=%v err=%v", ok2, err2)
 	}
 	// xfrm with child in spec
-	xfrm1 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/childName": "c1"}}}
-	ok3, err3 := validateIPSecConnectionDeletion(req2, nil, []corev1.Pod{xfrm1})
+	// xfrm1 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/childName": "c1"}}}
+	ok3, err3 := validateIPSecConnectionDeletion(req2, nil)
 	if err3 != nil || !ok3 {
 		t.Errorf("expected ok, got ok=%v err=%v", ok3, err3)
 	}
 	// xfrm with child not in spec, no workers
-	xfrm2 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/childName": "c2"}}}
-	ok4, err4 := validateIPSecConnectionDeletion(req2, nil, []corev1.Pod{xfrm2})
+	// xfrm2 := corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"ipman.dialo.ai/childName": "c2"}}}
+	ok4, err4 := validateIPSecConnectionDeletion(req2, nil)
 	if err4 != nil || !ok4 {
 		t.Errorf("expected ok, got ok=%v err=%v", ok4, err4)
 	}

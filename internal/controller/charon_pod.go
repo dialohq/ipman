@@ -66,6 +66,7 @@ func (s CharonPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 				Capabilities: &corev1.Capabilities{
 					Add: []corev1.Capability{
 						"NET_ADMIN",
+						"NET_RAW",
 					},
 				},
 			},

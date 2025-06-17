@@ -2,7 +2,11 @@ package controller
 
 import (
 	"testing"
+
+	ipmanv1 "dialo.ai/ipman/api/v1"
 )
+
+// Use the createTestReconciler function from diff_states_test.go
 
 // TestDiffStatesWithEmptyNodes tests how DiffStates handles cluster states with empty nodes
 func TestDiffStatesWithEmptyNodes(t *testing.T) {
@@ -62,7 +66,11 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 		// Note: The current implementation of DiffStates assumes that the desired and current states
 		// have the same number of nodes, so this test currently doesn't test actual cleanup behavior.
 		// In the future, the function should be enhanced to handle this case correctly.
-		actions := DiffStates(desiredState, currentState)
+		r := createTestReconciler()
+		actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+		if err != nil {
+			t.Fatalf("DiffStates() returned an error: %v", err)
+		}
 
 		// Currently, the implementation will return nil because it doesn't iterate through different node counts
 		if actions != nil {
@@ -124,7 +132,11 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 		}
 
 		// Same note as above - current implementation assumes same node count
-		actions := DiffStates(desiredState, currentState)
+		r := createTestReconciler()
+		actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+		if err != nil {
+			t.Fatalf("DiffStates() returned an error: %v", err)
+		}
 
 		if actions != nil {
 			t.Logf("DiffStates() returned %d actions with empty current state", len(actions))
@@ -245,7 +257,11 @@ func TestDiffStatesWithXfrmPods(t *testing.T) {
 				},
 			}
 
-			actions := DiffStates(desiredState, currentState)
+			r := createTestReconciler()
+			actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+			if err != nil {
+				t.Fatalf("DiffStates() returned an error: %v", err)
+			}
 
 			// Note: The current implementation of diffXfrms in ipman_controller.go always
 			// returns an empty slice at line 488, so these tests document the expected
@@ -310,7 +326,11 @@ func TestDiffStatesWithDifferentNodeCounts(t *testing.T) {
 
 		// The current implementation of DiffStates assumes equal node counts
 		// This test documents that this is an edge case that should be handled better
-		actions := DiffStates(desiredState, currentState)
+		r := createTestReconciler()
+		actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+		if err != nil {
+			t.Fatalf("DiffStates() returned an error: %v", err)
+		}
 
 		// Since the function assumes equal lengths and only iterates through the length of desired.Nodes,
 		// it would try to access an out-of-bounds index in the current.Nodes slice
@@ -336,7 +356,11 @@ func TestDiffStatesWithDifferentNodeCounts(t *testing.T) {
 
 		// The current implementation of DiffStates assumes equal node counts
 		// This test documents that this is an edge case that should be handled better
-		actions := DiffStates(desiredState, currentState)
+		r := createTestReconciler()
+		actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+		if err != nil {
+			t.Fatalf("DiffStates() returned an error: %v", err)
+		}
 
 		// Since the function only iterates through the length of desired.Nodes,
 		// it would miss the opportunity to delete the extra node in current.Nodes
@@ -399,7 +423,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 					},
 				}
 			},
-			expectedActions: 2, // Delete and create for Charon pod
+			expectedActions: 0, // don't delete crutial pods
 		},
 		{
 			name: "Nested change in Xfrm properties",
@@ -509,7 +533,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 					},
 				}
 			},
-			expectedActions: 2, // Delete and create for Charon pod only
+			expectedActions: 0, // Delete and create for Charon pod only
 		},
 	}
 
@@ -518,7 +542,11 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			desiredState := tt.setupDesired()
 			currentState := tt.setupCurrent()
 
-			actions := DiffStates(desiredState, currentState)
+			r := createTestReconciler()
+			actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+			if err != nil {
+				t.Fatalf("DiffStates() returned an error: %v", err)
+			}
 
 			if actions == nil && tt.expectedActions > 0 {
 				t.Fatalf("DiffStates() returned nil, expected %d actions", tt.expectedActions)

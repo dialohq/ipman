@@ -151,9 +151,9 @@
             dust
             nixos-rebuild
             nixos-generators
+            nilaway
           ];
           shellHook = ''
-            zsh
             go mod tidy
           '';
           env = {

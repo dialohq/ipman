@@ -25,6 +25,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
+var _ http.Handler = (*MutatingWebhookHandler)(nil)
+
 type MutatingWebhookHandler struct {
 	Client client.Client
 	Config rest.Config
@@ -45,7 +47,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	if err != nil {
 		logger := log.FromContext(ctx, "webhook", true)
 		logger.Error(err, "Error parsing request", "request", *r)
-		writeResponseDenied(w, in)
+		writeResponseDenied(w, in, "error parsing request")
 		return
 	}
 	if in.Request.Kind.Kind != "Pod" {
@@ -63,19 +65,23 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 	childName, childOk := pod.Annotations[ipmanv1.AnnotationChildName]
 	ipmanName, ipmanOk := pod.Annotations[ipmanv1.AnnotationIpmanName]
 	poolName, poolOk := pod.Annotations[ipmanv1.AnnotationPoolName]
-	if !(childOk && ipmanOk && poolOk) {
+	if !(childOk || ipmanOk || poolOk) {
 		writeResponseNoPatch(w, in)
+		return
+	}
+	if !(childOk && ipmanOk && poolOk) {
+		writeResponseDenied(w, in, "annotations missing")
 		return
 	}
 
 	clientSet, err := kubernetes.NewForConfig(&wh.Config)
 	if err != nil {
 		logger.Error(err, "Couldn't create clientset for managing leases")
-		writeResponseDenied(w, in)
+		writeResponseDenied(w, in, "couldn't create clientset")
 		return
 	}
 	var locker sync.Locker
-	if isDryRun {
+	if isDryRun || wh.Env.IsTest {
 		locker = &dummyLocker{}
 	} else {
 		// Sometimes in between this checks for existence of
@@ -100,7 +106,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 				time.Sleep(time.Duration(n) * time.Millisecond)
 			} else {
 				logger.Error(err, "Couldn't create a lease locker instance")
-				writeResponseDenied(w, in)
+				writeResponseDenied(w, in, "Couldnt create lease")
 				return
 			}
 		}
@@ -135,14 +141,14 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 
 	if len(ipsecconnection.Status.FreeIPs[ipsecconnectionChild.Name][poolName]) == 0 {
 		logger.Info("There are no free IP addresses for requested child. Denying request for pod.\n", "child", ipsecconnectionChild.Name, "status", ipsecconnection.Status)
-		writeResponseDenied(w, in)
+		writeResponseDenied(w, in, "No free ip addresses in pool")
 		return
 	}
 
 	pool, ok := ipsecconnection.Status.FreeIPs[ipsecconnectionChild.Name][poolName]
 	if !ok {
 		logger.Error(fmt.Errorf("Error, couldn't find pool"), "Pool not found in ipsecconnection", "annotations", pod.Annotations["ipman.dialo.ai/poolName"], "child", ipsecconnectionChild.Name, "ipsecconnection", ipsecconnection.Name)
-		writeResponseDenied(w, in)
+		writeResponseDenied(w, in, "Couldn't find pool")
 		return
 	}
 
@@ -156,8 +162,8 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	remoteJson, _ := json.Marshal(ipsecconnectionChild.RemoteIps)
-	localJson, _ := json.Marshal(ipsecconnectionChild.LocalIps)
+	remoteJson, _ := json.Marshal(ipsecconnectionChild.RemoteIPs)
+	localJson, _ := json.Marshal(ipsecconnectionChild.LocalIPs)
 	annotations := map[string]string{
 		ipmanv1.AnnotationVxlanIP:          pool[0],
 		ipmanv1.AnnotationXfrmIP:           ipsecconnectionChild.XfrmIP,
@@ -177,12 +183,12 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		ipsecconnection.Status.PendingIPs = map[string]string{}
 	}
 	ipsecconnection.Status.PendingIPs[ip] = time.Now().Format(time.Layout)
-	if !isDryRun {
+	if !isDryRun && !wh.Env.IsTest {
 		err = wh.Client.Status().Update(ctx, ipsecconnection)
 		if err != nil {
 			logger.Error(err, "Couldn't update status of ipsecconnection in webhook")
 			locker.Unlock()
-			writeResponseDenied(w, in)
+			writeResponseDenied(w, in, fmt.Sprintf("couldn't update status: %s", err.Error()))
 			return
 		}
 	}
@@ -198,7 +204,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 }
 
 func initContainer(child ipmanv1.Child, gateway, ip, image string) *corev1.Container {
-	remoteIps := strings.Join(child.RemoteIps, ",")
+	remoteIps := strings.Join(child.RemoteIPs, ",")
 	return &corev1.Container{
 		Name:            ipmanv1.InterfaceRequestContainerName,
 		Image:           image,

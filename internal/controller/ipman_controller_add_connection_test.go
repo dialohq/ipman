@@ -2,6 +2,8 @@ package controller
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 	"testing"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
@@ -42,8 +44,8 @@ func TestAddIPSecConnection(t *testing.T) {
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"192.168.1.0/24"},
-					RemoteIps: []string{"192.168.2.0/24"},
+					LocalIPs:  []string{"192.168.1.0/24"},
+					RemoteIPs: []string{"192.168.2.0/24"},
 					XfrmIP:    "192.168.1.1/24",
 					VxlanIP:   "192.168.1.2/24",
 					XfrmIfId:  101,
@@ -61,11 +63,21 @@ func TestAddIPSecConnection(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node1",
 		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				MachineID: "aaabbbcccdddeeefff",
+			},
+		},
 	}
 
 	node2 := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node2",
+		},
+		Status: corev1.NodeStatus{
+			NodeInfo: corev1.NodeSystemInfo{
+				MachineID: "fffeeedddcccbbbaaa",
+			},
 		},
 	}
 
@@ -73,7 +85,7 @@ func TestAddIPSecConnection(t *testing.T) {
 	// This simulates an already running IPSec connection with pods
 	charonPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "charon-pod-node1",
+			Name:      "charon-pod-aaabbbcccdddeeefff",
 			Namespace: "ipman-system",
 			Labels: map[string]string{
 				ipmanv1.LabelPodType: ipmanv1.LabelValueCharonPod,
@@ -111,7 +123,7 @@ func TestAddIPSecConnection(t *testing.T) {
 
 	proxyPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "proxy-pod-node1",
+			Name:      "proxy-pod-aaabbbcccdddeeefff",
 			Namespace: "ipman-system",
 			Labels: map[string]string{
 				ipmanv1.LabelPodType: ipmanv1.LabelValueProxyPod,
@@ -149,7 +161,20 @@ func TestAddIPSecConnection(t *testing.T) {
 				ipmanv1.LabelPodType: ipmanv1.LabelValueXfrmPod,
 			},
 			Annotations: map[string]string{
-				ipmanv1.AnnotationSpec: `{"routes":{"local_routes":["192.168.1.0/24"],"remote_routes":["192.168.2.0/24"],"bridge_fdb":{}},"props":{"owner_child":"child1","owner_connection":"existing-connection","interface_id":101,"xfrm_ip":"192.168.1.1/24","vxlan_ip":"192.168.1.2/24"}}`,
+				ipmanv1.AnnotationSpec: `{
+											 "routes":{
+												"local_routes":["192.168.1.0/24"],
+												"remote_routes":["192.168.2.0/24"],
+												"bridge_fdb":{}
+											  },
+											  "properties":{
+											  	"owner_child":"child1",
+											  	"owner_connection":"existing-connection",
+											  	"interface_id":101,
+											  	"xfrm_ip":"192.168.1.1/24",
+											  	"vxlan_ip":"192.168.1.2/24"
+											   }
+										   }`,
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -159,7 +184,7 @@ func TestAddIPSecConnection(t *testing.T) {
 			NodeName: "node1",
 			Containers: []corev1.Container{
 				{
-					Name:  "xfrminion",
+					Name:  ipmanv1.XfrminionContainerName,
 					Image: "test-xfrm-image",
 				},
 			},
@@ -193,8 +218,8 @@ func TestAddIPSecConnection(t *testing.T) {
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"192.168.3.0/24"},
-					RemoteIps: []string{"192.168.4.0/24"},
+					LocalIPs:  []string{"192.168.3.0/24"},
+					RemoteIPs: []string{"192.168.4.0/24"},
 					XfrmIP:    "192.168.3.1/24",
 					VxlanIP:   "192.168.3.2/24",
 					XfrmIfId:  102,
@@ -297,7 +322,8 @@ func TestAddIPSecConnection(t *testing.T) {
 	assert.Equal(t, []string{"192.168.4.0/24"}, desiredNode2State.Xfrms[0].Spec.Routes.Remote, "Node2 xfrm should have correct remote routes")
 
 	// Calculate the actions needed to reconcile
-	actions := DiffStates(desiredState, currentState)
+	actions, err := reconciler.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{*existingConnection, *newConnection})
+	assert.NoError(t, err, "DiffStates should not return an error")
 
 	// Verify the actions
 	// We expect several actions for setting up the new node:
@@ -314,6 +340,9 @@ func TestAddIPSecConnection(t *testing.T) {
 	node1ProxyActions := 0
 	node1XfrmActions := 0
 
+	for _, action := range actions {
+		fmt.Println(reflect.TypeOf(action).String())
+	}
 	for _, action := range actions {
 		switch a := action.(type) {
 		case *CreatePodAction[CharonPodSpec]:

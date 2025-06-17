@@ -5,18 +5,24 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"maps"
 	"net"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
 	"dialo.ai/ipman/pkg/netconfig"
+	"dialo.ai/ipman/pkg/swanparse"
+	"github.com/fsnotify/fsnotify"
+	"github.com/plan9better/goviciclient"
 	ip "github.com/vishvananda/netlink"
 )
 
@@ -31,69 +37,67 @@ type CommandResponse struct {
 	Error  string `json:"error,omitempty"`
 }
 
-func swanExec(args ...string) *exec.Cmd {
-	return exec.Command("swanctl", args...)
+func getExtra(e map[string]string, k string, d string) string {
+	val, ok := e[k]
+	if ok {
+		return val
+	}
+	return d
 }
 
-func getAction(path string, childName *string) (*exec.Cmd, error) {
-	if childName == nil {
-		switch path {
-		case "/status":
-			return swanExec("--list-conns"), nil
-		case "/config":
-			return exec.Command("cat", SWANCTL_CONF_PATH), nil
-		default:
-			return nil, fmt.Errorf("Amount of arguments and/or their type is invalid")
-		}
-	}
-
-	// TODO: secure this
-	switch path {
-	case "/init":
-		return swanExec("-i", "-c", *childName), nil
-	case "/terminate":
-		return swanExec("-t", "-c", *childName), nil
-	default:
-		return nil, fmt.Errorf("Amount of arguments and/or their type is invalid")
-	}
-}
-
-func runCommandHandler(w http.ResponseWriter, r *http.Request) {
-	err := r.ParseForm()
+func translate(ipsec ipmanv1.IPSecConnectionSpec) (*goviciclient.IKEConfig, error) {
+	// parse from extra
+	rekey_time, err := strconv.ParseInt(getExtra(ipsec.Extra, "rekey_time", "14400"), 10, 64)
 	if err != nil {
-		fmt.Println("Error parsing form: ", err)
+		return nil, fmt.Errorf("Error parsing rekey_time: %w", err)
 	}
-
-	var splitPath []string
-	argsPassed := strings.Contains(r.URL.String(), "?")
-	if argsPassed {
-		splitPath = strings.Split(r.URL.String(), "?")
-	} else {
-		splitPath = []string{r.URL.String()}
-	}
-
-	path := splitPath[0]
-	var childName *string
-	if len(splitPath) == 1 {
-		childName = nil
-	} else {
-		childName = &r.Form["childName"][0]
-	}
-
-	var resp CommandResponse
-	cmd, err := getAction(path, childName)
+	reauth_time, err := strconv.ParseInt(getExtra(ipsec.Extra, "reauth_time", "14400"), 10, 64)
 	if err != nil {
-		resp.Error = err.Error()
-	} else {
-		output, err := cmd.CombinedOutput()
-		resp.Output = string(output)
-		if err != nil {
-			resp.Error = err.Error()
-		}
+		return nil, fmt.Errorf("Error parsing reauth_time: %w", err)
+	}
+	proposals := getExtra(ipsec.Extra, "esp_proposals", "aes256-sha256-ecp256")
+	version, err := strconv.ParseInt(getExtra(ipsec.Extra, "version", "2"), 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing proposals: %w", err)
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
+	ike := goviciclient.IKEConfig{
+		LocalAddrs:  []string{ipsec.LocalAddr},
+		RemoteAddrs: []string{ipsec.RemoteAddr},
+		Proposals:   []string{proposals},
+		Version:     strconv.FormatInt(version, 10),
+		ReauthTime:  int(rekey_time),
+		RekeyTime:   int(reauth_time),
+		LocalAuths: &goviciclient.LocalAuthConfig{
+			ID:   ipsec.LocalId,
+			Auth: "psk",
+		},
+		RemoteAuths: &goviciclient.RemoteAuthConfig{
+			ID:   ipsec.RemoteId,
+			Auth: "psk",
+		},
+		Children: map[string]goviciclient.ChildSAConfig{},
+	}
+
+	for k, v := range ipsec.Children {
+		child := goviciclient.ChildSAConfig{
+			LocalTS:        v.LocalIPs,
+			RemoteTS:       v.RemoteIPs,
+			InInterfaceID:  v.XfrmIfId,
+			OutInterfaceID: v.XfrmIfId,
+		}
+		val, ok := v.Extra["start_action"]
+		if ok {
+			child.StartAction = val
+		}
+		val, ok = v.Extra["esp_proposals"]
+		if ok {
+			child.EspProposals = []string{val}
+		}
+
+		ike.Children[k] = child
+	}
+	return &ike, nil
 }
 
 func p0ng(w http.ResponseWriter, r *http.Request) {
@@ -232,11 +236,17 @@ func createVxlan(w http.ResponseWriter, r *http.Request) {
 	vi.IfId = conf.XfrmIfId
 	vi.XfrmIP = conf.XfrmIP
 	vi.XfrmUnderlyingIP = xfrmPodCiliumIPs[vd.ChildName]
-	vi.RemoteIps = conf.RemoteIps
+	vi.RemoteIps = conf.RemoteIPs
 	vi.Wait = 0
 	http.Get(fmt.Sprintf("http://%s:8080/add?ip=%s&vxlanIp=%s", xfrmPodCiliumIPs[vd.ChildName], vd.VxlanCiliumIP, vd.VxlanIfIp))
 	logger.Info("Added vxlan interface", "id", vi.IfId)
 	json.NewEncoder(w).Encode(vi)
+}
+
+func swanctl(args ...string) (string, error) {
+	cmd := exec.Command("swanctl", args...)
+	out, err := cmd.Output()
+	return string(out), err
 }
 
 func reloadConfig(w http.ResponseWriter, r *http.Request) {
@@ -251,56 +261,251 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode("Bad Request")
 		return
 	}
+	response := comms.ConnectionLoadError{
+		FailedConns:   []string{},
+		FailedSecrets: []string{},
+		Errs:          []string{},
+	}
 
 	data := &comms.ReloadData{}
 	err = json.Unmarshal(dataBytes, data)
 	if err != nil {
-		logger.Error("Error unmarshalling data of request for reload", "msg", err.Error(), "request", string(dataBytes))
 		w.WriteHeader(400)
-		json.NewEncoder(w).Encode("Bad Request")
+		response.Errs = append(response.Errs, "Failed to unmarshal request data")
+		json.NewEncoder(w).Encode(response)
 		return
 	}
-
-	logger.Info("Writing to file", "file", SWANCTL_CONF_PATH, "data", data.SerializedConfig)
-	err = os.WriteFile(SWANCTL_CONF_PATH, []byte(data.SerializedConfig), 0644)
+	type secretInfo struct {
+		secret string
+		id     string
+	}
+	toLoad := map[string]goviciclient.IKEConfig{}
+	secrets := map[string]secretInfo{}
+	for _, c := range data.Configs {
+		cfg, err := translate(c.IPSecConnection.Spec)
+		if err != nil {
+			response.Errs = append(response.Errs, fmt.Sprintf("Failed to parse config '%s': %w", c.IPSecConnection.Spec.Name, err))
+		} else {
+			toLoad[c.IPSecConnection.Spec.Name] = *cfg
+			secrets[c.IPSecConnection.Spec.Name] = secretInfo{secret: c.Secret, id: c.IPSecConnection.Spec.RemoteAddr}
+		}
+	}
+	vc, err := goviciclient.NewViciClient("", "")
 	if err != nil {
-		logger.Error("Error writing data of request for reload to file", "err", err.Error())
-		w.WriteHeader(400)
-		json.NewEncoder(w).Encode("Bad Request")
+		response.Errs = append(response.Errs, fmt.Sprintf("Failed to create vici client: %w", err))
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(response)
 		return
 	}
+	defer vc.Close()
 
-	logger.Info("Reloading swanctl")
-	cmd := swanExec("--load-all", "--file", SWANCTL_CONF_PATH)
-	out, err := cmd.CombinedOutput()
+	notLoadedSecrets := []string{}
+	for k, secret := range secrets {
+		ke := goviciclient.Key{
+			Typ:    "IKE",
+			Data:   strings.TrimSpace(secret.secret),
+			Owners: []string{secret.id},
+		}
+		err = vc.LoadShared(ke)
+		if err != nil {
+			notLoadedSecrets = append(notLoadedSecrets, k)
+		}
+	}
+	for _, k := range notLoadedSecrets {
+		delete(toLoad, k)
+	}
+
+	err = vc.LoadConns(toLoad)
+	notLoadedConns := []string{}
 	if err != nil {
-		logger.Error("Couldn't reload swanctl", "output", string(out), "error", err)
+		conns, err := vc.ListConns("")
+		if err != nil {
+			response.Errs = append(response.Errs, fmt.Sprintf("Some configs failed to load, Couldn't check which ones: %s", err.Error()))
+		} else {
+			loaded := []string{}
+			for _, con := range conns {
+				loaded = append(loaded, slices.Collect(maps.Keys(con))...)
+			}
+
+			for name := range maps.Keys(toLoad) {
+				if !slices.Contains(loaded, name) {
+					notLoadedConns = append(notLoadedConns, name)
+				}
+			}
+		}
+	}
+
+	if len(notLoadedConns) != 0 || len(notLoadedSecrets) != 0 || len(response.Errs) != 0 {
 		w.WriteHeader(400)
-		json.NewEncoder(w).Encode("Bad Request")
+	} else {
+		w.WriteHeader(200)
+	}
+	response.FailedConns = notLoadedConns
+	response.FailedSecrets = notLoadedSecrets
+	json.NewEncoder(w).Encode(response)
+	return
+}
+
+// RestartConnection attempts to restart a connection
+func RestartConnection(connName string, logger *slog.Logger) error {
+	output, err := swanctl("--initiate", "--child", connName, "--timeout", "3")
+	if err != nil {
+		logger.Error("Failed to restart connection", "conn", connName, "err", err, "output", output)
+		return fmt.Errorf("failed to restart connection %s: %w", connName, err)
+	}
+	logger.Info("Successfully initiated connection", "conn", connName, "output", output)
+	return nil
+}
+
+func reconcileIPSec(conns, sas *swanparse.SwanAST) error {
+	handler := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(handler)
+
+	reconciler := NewReconcileVisitor(conns, sas)
+	err := reconciler.VisitAST(conns)
+	if err != nil {
+		return err
+	}
+
+	// Handle missing connections and children
+	if len(reconciler.MissingConns) > 0 || len(reconciler.MissingChildren) > 0 {
+		logger.Info("Found missing connections or children",
+			"missing_conns", slices.Collect(maps.Keys(reconciler.MissingConns)),
+			"missing_children", slices.Collect(maps.Keys(reconciler.MissingChildren)))
+
+		// Restart missing connections
+		for conn := range reconciler.MissingConns {
+			if err := RestartConnection(conn, logger); err != nil {
+				logger.Error("Error restarting connection", "conn", conn, "err", err)
+			} else {
+				logger.Info("Successfully restarted connection", "conn", conn)
+			}
+		}
+
+		// Restart missing child connections
+		for child := range reconciler.MissingChildren {
+			if err := RestartConnection(child, logger); err != nil {
+				logger.Error("Error restarting child connection", "child", child, "err", err)
+			} else {
+				logger.Info("Successfully restarted child connection", "child", child)
+			}
+		}
+	}
+
+	return nil
+}
+
+func tryInit(vc *goviciclient.ViciClient, logger *slog.Logger) {
+	// Get the list of connections
+	o, err := swanctl("--list-conns", "--raw")
+	if err != nil {
+		logger.Error("Error listing swanctl connections", "err", err)
+		return
+	}
+	connsAST, err := swanparse.Parse(o)
+	if err != nil {
+		logger.Error("Error parsing swanctl connections", "err", err)
 		return
 	}
 
-	w.WriteHeader(200)
-	w.Write([]byte("OK"))
+	// Get the list of security associations
+	o, err = swanctl("--list-sas", "--raw")
+	if err != nil {
+		logger.Error("Error listing security associations", "err", err)
+		return
+	}
+	sasAST, err := swanparse.Parse(o)
+	if err != nil {
+		logger.Error("Error parsing security associations", "err", err)
+		return
+	}
+
+	// Find missing connections and restart them
+	err = reconcileIPSec(connsAST, sasAST)
+	if err != nil {
+		logger.Error("Error reconciling connections", "err", err)
+		return
+	}
+}
+
+func fileExists(path string) (bool, error) {
+	path = strings.TrimSuffix(path, "/")
+	p := strings.Split(path, "/")
+	if p == nil {
+		return false, fmt.Errorf("Invalid path")
+	}
+	fileName := p[len(p)-1]
+	dirPath := p[:len(p)-1]
+
+	ents, err := os.ReadDir(strings.Join(dirPath, "/"))
+	if err != nil {
+		return false, err
+	}
+	for _, e := range ents {
+		if e.Name() == fileName {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func main() {
-	os.WriteFile(STRONGSWAN_CONF_PATH, []byte{}, os.ModePerm)
-	API_SOCKET_PATH := os.Getenv("HOST_SOCKETS_PATH")
-	if !strings.HasSuffix("/", API_SOCKET_PATH) {
-		API_SOCKET_PATH = API_SOCKET_PATH + "/"
-	}
-
-	API_SOCKET_PATH += "restctl.sock"
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
+	SOCKETS_DIR := os.Getenv("HOST_SOCKETS_PATH")
+	fmt.Println(len(SOCKETS_DIR), []rune(SOCKETS_DIR))
+	if !strings.HasSuffix(SOCKETS_DIR, "/") {
+		SOCKETS_DIR = SOCKETS_DIR + "/"
+	}
+	ViciSocketPath := SOCKETS_DIR + "charon.vici"
+	RestctlSocketPath := SOCKETS_DIR + "restctl.sock"
+
+	ok, err := fileExists(ViciSocketPath)
+	if err != nil {
+		logger.Error("Error while checking for socket existence.")
+		os.Exit(1)
+	}
+
+	if !ok {
+		fsw, err := fsnotify.NewWatcher()
+		if err != nil {
+			logger.Error("Error creating fs watcher")
+			os.Exit(1)
+		}
+		err = fsw.Add(SOCKETS_DIR)
+		if err != nil {
+			logger.Error("Couldn't add a path to watch", "msg", err, "path", ViciSocketPath)
+		}
+		for {
+			e := <-fsw.Events
+			if e.Name == ViciSocketPath && e.Has(fsnotify.Create) {
+				break
+			}
+		}
+	}
+
+	var vc *goviciclient.ViciClient
+	for {
+		vc, err = goviciclient.NewViciClient("", "")
+		if err != nil {
+			logger.Error("Failed to create a vici client on container start", "msg", err)
+			time.Sleep(time.Second)
+			continue
+		} else {
+			logger.Info("Created go vici client")
+			break
+		}
+	}
+	go func() {
+		for {
+			time.Sleep(5 * time.Second)
+			tryInit(vc, logger)
+		}
+	}()
+
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("/status", runCommandHandler)
-	mux.HandleFunc("/config", runCommandHandler)
-	mux.HandleFunc("/init", runCommandHandler)
-	mux.HandleFunc("/terminate", runCommandHandler)
 	mux.HandleFunc("/p1ng", p0ng)
 	mux.HandleFunc("/reload", reloadConfig)
 	mux.HandleFunc("/xfrm", createXfrm)
@@ -310,9 +515,21 @@ func main() {
 		Handler: mux,
 	}
 
-	listener, err := net.Listen("unix", API_SOCKET_PATH)
+	ok, err = fileExists(RestctlSocketPath)
 	if err != nil {
-		logger.Error("Error listening on socket", "msg", err, "socket-path", API_SOCKET_PATH)
+		logger.Error("Error while checking for restctl socket existence.")
+		os.Exit(1)
+	}
+	if ok {
+		err = os.Remove(RestctlSocketPath)
+		if err != nil {
+			fmt.Println("Couldn't remove already existing restctl socket: %w", err)
+		}
+	}
+
+	listener, err := net.Listen("unix", RestctlSocketPath)
+	if err != nil {
+		logger.Error("Error listening on socket", "msg", err, "socket-path", RestctlSocketPath)
 		os.Exit(1)
 	}
 
@@ -320,11 +537,11 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-c
-		os.Remove(API_SOCKET_PATH)
-		os.Exit(1)
+		os.Remove(RestctlSocketPath)
+		os.Exit(0)
 	}()
 
-	logger.Info("Listening on socket", "socket", API_SOCKET_PATH)
+	logger.Info("Listening on socket", "socket", RestctlSocketPath)
 	if err := server.Serve(listener); err != nil {
 		logger.Error("Couldn't start server on listener", "msg", err)
 	}

@@ -6,8 +6,29 @@ import (
 	"reflect"
 	"testing"
 
+	ipmanv1 "dialo.ai/ipman/api/v1"
 	"github.com/r3labs/diff/v3"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
+
+// createTestReconciler creates a reconciler for testing
+func createTestReconciler() *IPSecConnectionReconciler {
+	scheme := runtime.NewScheme()
+	_ = clientgoscheme.AddToScheme(scheme)
+	_ = ipmanv1.AddToScheme(scheme)
+
+	return &IPSecConnectionReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+		Env: Envs{
+			NamespaceName:            "ipman-system",
+			IsTest:                   true,
+			WaitForPodTimeoutSeconds: 1,
+		},
+	}
+}
 
 // TestDiffStatesComprehensive tests the DiffStates function more comprehensively
 func TestDiffStatesComprehensive(t *testing.T) {
@@ -98,7 +119,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					Xfrms:  []IpmanPod[XfrmPodSpec]{},
 				}
 			},
-			expectedActions: 3, // Create actions for Charon, Proxy, 1 Xfrm
+			expectedActions: 4, // Create actions for Charon, Proxy, 1 Xfrm and override config
 			validateActions: func(t *testing.T, actions []Action) {
 				for _, action := range actions {
 					if _, ok := action.(*CreatePodAction[CharonPodSpec]); ok {
@@ -108,6 +129,9 @@ func TestDiffStatesComprehensive(t *testing.T) {
 						continue
 					}
 					if _, ok := action.(*CreatePodAction[XfrmPodSpec]); ok {
+						continue
+					}
+					if _, ok := action.(*OverrideConfigAction); ok {
 						continue
 					}
 					t.Errorf("Unexpected action type: %T", action)
@@ -146,7 +170,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 			},
 		},
 		{
-			name: "Charon_pod_image_changed",
+			name: "Charon pod image changed",
 			setupDesired: func(ns NodeState) NodeState {
 				out, _ := json.Marshal(ns)
 				ns2 := &NodeState{}
@@ -160,30 +184,15 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			expectedActions: 2, // Delete and create for Charon
+			expectedActions: 0, // Don't auto recreate critical pods
 			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 2 {
+
+				if len(actions) != 0 {
 					actionNames := []string{}
 					for _, a := range actions {
 						actionNames = append(actionNames, reflect.TypeOf(a).String())
 					}
-					t.Fatalf("Expected 2 actions, got %d, %+v", len(actions), actionNames)
-				}
-
-				deleteAction, ok := actions[0].(*DeletePodAction[CharonPodSpec])
-				if !ok {
-					t.Errorf("Expected first action to be DeletePodAction[CharonPodSpec], got %T", actions[0])
-				}
-				if deleteAction != nil && deleteAction.Pod.Meta.Image != "test-image" {
-					t.Errorf("Expected deleted pod image to be 'test-image', got '%s'", deleteAction.Pod.Meta.Image)
-				}
-
-				createAction, ok := actions[1].(*CreatePodAction[CharonPodSpec])
-				if !ok {
-					t.Errorf("Expected second action to be CreatePodAction[CharonPodSpec], got %T", actions[1])
-				}
-				if createAction != nil && createAction.Pod.Meta.Image != "new-image" {
-					t.Errorf("Expected created pod image to be 'new-image', got '%s'", createAction.Pod.Meta.Image)
+					t.Fatalf("Expected 0 actions, got %d, %+v", len(actions), actionNames)
 				}
 			},
 		},
@@ -204,27 +213,10 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			expectedActions: 4, // Delete and create for each pod type
+			expectedActions: 0, // Don't destroy critical pods
 			validateActions: func(t *testing.T, actions []Action) {
-				deleteCount := 0
-				createCount := 0
-
-				for _, action := range actions {
-					switch action.(type) {
-					case *DeletePodAction[CharonPodSpec], *DeletePodAction[ProxyPodSpec]:
-						deleteCount++
-					case *CreatePodAction[CharonPodSpec], *CreatePodAction[ProxyPodSpec]:
-						createCount++
-					default:
-						t.Errorf("Unexpected action type: %T", action)
-					}
-				}
-
-				if deleteCount != 2 {
-					t.Errorf("Expected 3 delete actions, got %d", deleteCount)
-				}
-				if createCount != 2 {
-					t.Errorf("Expected 3 create actions, got %d", createCount)
+				if len(actions) != 0 {
+					t.Errorf("Expected 0 actions found %d", len(actions))
 				}
 			},
 		},
@@ -247,10 +239,11 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			expectedActions: 6, // Delete and create for Charon, Proxy, and Xfrm
+			expectedActions: 7, // Delete and create for Charon, Proxy, override config, and Xfrm
 			validateActions: func(t *testing.T, actions []Action) {
 				deleteCount := 0
 				createCount := 0
+				overrideCount := 0
 
 				for _, action := range actions {
 					switch action.(type) {
@@ -288,6 +281,8 @@ func TestDiffStatesComprehensive(t *testing.T) {
 								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						}
+					case *OverrideConfigAction:
+						overrideCount++
 					default:
 						t.Errorf("Unexpected action type: %T", action)
 					}
@@ -298,6 +293,9 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				}
 				if createCount != 3 {
 					t.Errorf("Expected 3 create actions, got %d", createCount)
+				}
+				if overrideCount != 1 {
+					t.Errorf("Expected 1 override action, got %d", overrideCount)
 				}
 			},
 		},
@@ -319,7 +317,11 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				},
 			}
 
-			actions := DiffStates(desiredState, currentState)
+			r := createTestReconciler()
+			actions, err := r.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+			if err != nil {
+				t.Fatalf("DiffStates() returned an error: %v", err)
+			}
 
 			if actions == nil && tt.expectedActions > 0 {
 				t.Fatalf("DiffStates() returned nil, expected %d actions", tt.expectedActions)
@@ -450,25 +452,25 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 			name:            "Change only on node1",
 			desiredSetup:    ClusterState{Nodes: []NodeState{changed_node1, node2}},
 			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			expectedActions: 2, // Delete and create for node1 Charon
+			expectedActions: 0,
 		},
 		{
 			name:            "Change only on node2",
 			desiredSetup:    ClusterState{Nodes: []NodeState{node1, changed_node2}},
 			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			expectedActions: 2, // Delete and create for node2 Proxy
+			expectedActions: 0,
 		},
 		{
 			name:            "Changes on both nodes",
 			desiredSetup:    ClusterState{Nodes: []NodeState{changed_node1, changed_node2}},
 			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			expectedActions: 4, // Delete and create for both nodes
+			expectedActions: 0, // Delete and create for both nodes
 		},
 		{
 			name:            "Add missing pods on both nodes",
 			desiredSetup:    ClusterState{Nodes: []NodeState{node_with_pods1, node_with_pods2}},
 			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			expectedActions: 1, // Create for node1 Proxy
+			expectedActions: 2, // Create for node1 Proxy, and override config
 		},
 		{
 			name:            "Remove pods from both nodes",
@@ -481,7 +483,11 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fmt.Printf("------------\n%+v\n%+v\n", tt.currentSetup, tt.desiredSetup)
-			actions := DiffStates(&tt.desiredSetup, &tt.currentSetup)
+			r := createTestReconciler()
+			actions, err := r.DiffStates(&tt.desiredSetup, &tt.currentSetup, []ipmanv1.IPSecConnection{})
+			if err != nil {
+				t.Fatalf("DiffStates() returned an error: %v", err)
+			}
 
 			if actions == nil && tt.expectedActions > 0 {
 				t.Fatalf("DiffStates() returned nil, expected %d actions", tt.expectedActions)
@@ -650,7 +656,7 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 			expectedTypes:   []string{"*controller.CreatePodAction[dialo.ai/ipman/internal/controller.CharonPodSpec]"},
 		},
 		{
-			name: "Different image (recreate)",
+			name: "Different image",
 			desired: &IpmanPod[CharonPodSpec]{
 				Meta: PodMeta{
 					Name:      "test-pod",
@@ -673,14 +679,14 @@ func TestDiffImmutablePodExtensive(t *testing.T) {
 					HostPath: "/test/path",
 				},
 			},
-			expectedActions: 2,
+			expectedActions: 0,
 			expectedTypes: []string{
 				"*controller.DeletePodAction[dialo.ai/ipman/internal/controller.CharonPodSpec]",
 				"*controller.CreatePodAction[dialo.ai/ipman/internal/controller.CharonPodSpec]",
 			},
 		},
 		{
-			name: "Different namespace (recreate)",
+			name: "Different namespace",
 			desired: &IpmanPod[CharonPodSpec]{
 				Meta: PodMeta{
 					Name:      "test-pod",

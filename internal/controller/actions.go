@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"slices"
 	"time"
 
@@ -33,7 +35,12 @@ func createPodFromSpec[S IpmanPodSpec](p *IpmanPod[S], r *IPSecConnectionReconci
 // Do executes the pod creation action against the Kubernetes API
 func (a *CreatePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
 	pod := createPodFromSpec(a.Pod, r)
+	fmt.Println("Creating pod")
 	err := r.Create(ctx, &pod)
+	if err != nil {
+		fmt.Println("Pod creation error", err)
+		return err
+	}
 	finishedPod, err := r.waitForPodReady(types.NamespacedName{Namespace: a.Pod.Meta.Namespace, Name: a.Pod.Meta.Name})
 	if err != nil {
 		return err
@@ -86,7 +93,7 @@ func (a *AddRemoteRouteAction) Do(ctx context.Context, r *IPSecConnectionReconci
 		return fmt.Errorf("Error adding remote route: response status code not 200, is %d", resp.StatusCode)
 	}
 
-	x := XfrmFromPod(pod)
+	x := r.XfrmFromPod(pod)
 
 	x.Spec.Routes.Remote = append(x.Spec.Routes.Remote, a.Route)
 	slices.Sort(x.Spec.Routes.Remote)
@@ -118,7 +125,7 @@ func (a *DeleteRemoteRouteAction) Do(ctx context.Context, r *IPSecConnectionReco
 		return fmt.Errorf("Error adding remote route: response status code not 200, is %d", resp.StatusCode)
 	}
 
-	x := XfrmFromPod(pod)
+	x := r.XfrmFromPod(pod)
 
 	x.Spec.Routes.Remote = slices.DeleteFunc(x.Spec.Routes.Remote, func(rt string) bool {
 		return rt == a.Route
@@ -147,7 +154,7 @@ func (a *AddLocalRouteAction) Do(ctx context.Context, r *IPSecConnectionReconcil
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("Error adding local route: response status code not 200, is %d", resp.StatusCode)
 	}
-	x := XfrmFromPod(pod)
+	x := r.XfrmFromPod(pod)
 
 	x.Spec.Routes.Local = append(x.Spec.Routes.Local, a.Route)
 	slices.Sort(x.Spec.Routes.Local)
@@ -174,7 +181,7 @@ func (a *DeleteLocalRouteAction) Do(ctx context.Context, r *IPSecConnectionRecon
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("Error deleting local route: response status code not 200, is %d", resp.StatusCode)
 	}
-	x := XfrmFromPod(pod)
+	x := r.XfrmFromPod(pod)
 
 	x.Spec.Routes.Local = slices.DeleteFunc(x.Spec.Routes.Local, func(rt string) bool {
 		return rt == a.Route
@@ -253,7 +260,7 @@ func (a *AddBridgeFDBAction) Do(ctx context.Context, r *IPSecConnectionReconcile
 	if err != nil {
 		return err
 	}
-	x := XfrmFromPod(pod)
+	x := r.XfrmFromPod(pod)
 	if x.Spec.Routes.BridgeFDB == nil {
 		x.Spec.Routes.BridgeFDB = LocalRoutes{}
 	}
@@ -281,7 +288,7 @@ func (a *DeleteBridgeFDBAction) Do(ctx context.Context, r *IPSecConnectionReconc
 	if err != nil {
 		return err
 	}
-	x := XfrmFromPod(pod)
+	x := r.XfrmFromPod(pod)
 	if x.Spec.Routes.BridgeFDB == nil {
 		x.Spec.Routes.BridgeFDB = LocalRoutes{}
 	}
@@ -299,6 +306,33 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	err := r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: a.PodName}, &pod)
 	if err != nil {
 		return fmt.Errorf("Couldn't get pod %s: %w", a.PodName, err)
+	}
+	if r.Env.IsTest {
+		return fmt.Errorf("Couldn't send ping request to proxy pod")
+	}
+	tries := 0
+	for tries < 5 {
+		tries += 1
+		url := fmt.Sprintf("http://%s/p1ng", pod.Status.PodIP)
+		resp, err := http.Get(url)
+		if err != nil {
+			fmt.Println("Waiting for proxy pod to respond to ping")
+			time.Sleep(time.Second)
+			continue
+		}
+		defer resp.Body.Close()
+		out, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println("Couldn't read body of p1ng response from proxy pod")
+			time.Sleep(time.Second)
+			continue
+		}
+		if string(out) == "p0ng" {
+			break
+		} else {
+			fmt.Println("Wrong response from proxy pod p1ng", string(out))
+			time.Sleep(time.Second)
+		}
 	}
 	secrets := map[string]string{}
 	for _, conn := range a.Configs {
@@ -323,18 +357,25 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 			})
 		}
 	}
-	finalConfig := ipmanv1.SerializeAllToConf(d)
 	url := fmt.Sprintf("http://%s/reload", pod.Status.PodIP)
-
 	data := comms.ReloadData{
-		SerializedConfig: finalConfig,
+		Configs: d,
 	}
 	resp, err := comms.SendPost(url, data)
 	if err != nil {
 		return fmt.Errorf("Error sending post to reload charon pod %s: %w", a.PodName, err)
 	}
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("Error parsing response to reload request on charon pod '%s': %w", a.PodName, err)
+	}
+	rd := comms.ConnectionLoadError{}
+	err = json.Unmarshal(out, &rd)
+	if err != nil {
+		return fmt.Errorf("Error unmarshaling response to reload request on charon pod '%s', body is %s: %w", a.PodName, string(out), err)
+	}
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Error requesting reload of strongswan config on pod %s: %w", a.PodName, err)
+		return rd
 	}
 	spec := ProxyPodSpec{}
 	err = json.Unmarshal([]byte(pod.Annotations[ipmanv1.AnnotationSpec]), &spec)
@@ -343,10 +384,12 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	}
 	connSpecs := []ipmanv1.IPSecConnectionSpec{}
 	for _, s := range a.Configs {
-		connSpecs = append(connSpecs, s.Spec)
+		if !slices.Contains(rd.FailedConns, s.Spec.Name) {
+			connSpecs = append(connSpecs, s.Spec)
+		}
 	}
 	spec.Configs = connSpecs
-	out, err := json.Marshal(spec)
+	out, err = json.Marshal(spec)
 	if err != nil {
 		return fmt.Errorf("Coulnd't marshal spec")
 	}

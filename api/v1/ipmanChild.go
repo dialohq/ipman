@@ -13,8 +13,8 @@ import (
 
 type Child struct {
 	Name      string              `json:"name"`
-	LocalIps  []string            `json:"local_ips"`
-	RemoteIps []string            `json:"remote_ips"`
+	LocalIPs  []string            `json:"local_ips"`
+	RemoteIPs []string            `json:"remote_ips"`
 	XfrmIfId  int                 `json:"if_id"`
 	IpPools   map[string][]string `json:"ip_pools"`
 	XfrmIP    string              `json:"xfrm_ip"`
@@ -33,16 +33,16 @@ func (c *Child) EqualExceptChangable(c2 Child) bool {
 	c2_copy := c2.DeepCopy()
 	c_copy.IpPools = nil
 	c2_copy.IpPools = nil
-	c_copy.LocalIps = nil
-	c2_copy.LocalIps = nil
+	c_copy.LocalIPs = nil
+	c2_copy.LocalIPs = nil
 
 	return reflect.DeepEqual(c_copy, c2_copy)
 }
 
 // TODO: migrate to go templates
 func (c *Child) SerializeToConf() string {
-	local_ts := strings.Join(c.LocalIps, ",")
-	remote_ts := strings.Join(c.RemoteIps, ",")
+	local_ts := strings.Join(c.LocalIPs, ",")
+	remote_ts := strings.Join(c.RemoteIPs, ",")
 
 	conf := fmt.Sprintf(`
 			%s {

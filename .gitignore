@@ -6,3 +6,5 @@ helm/ipman-*.tgz
 .github/workflows/.secrets
 
 **/.claude/settings.local.json
+
+.direnv

@@ -16,7 +16,7 @@ import (
 // XfrmPodSpec defines the specification for an Xfrm pod
 type XfrmPodSpec struct {
 	Routes Routes         `json:"routes" diff:"routes"`
-	Props  XfrmProperties `json:"properties" diff:"props"`
+	Props  XfrmProperties `json:"properties" diff:"properties"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for XfrmPodSpec

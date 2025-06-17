@@ -3,6 +3,7 @@ package comms
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
@@ -49,8 +50,23 @@ type VxlanData struct {
 	ChildName     string `json:"child_name"`
 }
 
+type ConnInfo struct {
+	Config ipmanv1.IPSecConnection `json:"config"`
+	Secret string                  `json:"secret"`
+}
+
 type ReloadData struct {
-	SerializedConfig string `json:"serializedConfig"`
+	Configs []ipmanv1.ConnData `json:"info"`
+}
+
+type ConnectionLoadError struct {
+	FailedConns   []string `json:"failed_conns"`
+	FailedSecrets []string `json:"failed_secrets"`
+	Errs          []string `json:"error"`
+}
+
+func (e ConnectionLoadError) Error() string {
+	return fmt.Sprintf("%+v", e.Errs)
 }
 
 type StateRequestData struct {
@@ -70,11 +86,6 @@ type PidResponseData struct {
 
 type AddRoutesResponseData struct {
 	Error string `json:"error"`
-}
-
-type ConnData struct {
-	Secret string
-	Ipman  ipmanv1.IPSecConnection
 }
 
 func SendPost[T any](url string, data T) (*http.Response, error) {

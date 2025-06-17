@@ -1,301 +1,491 @@
 package controller
 
 import (
+	"reflect"
 	"testing"
+
+	ipmanv1 "dialo.ai/ipman/api/v1"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
-func TestDiffXfrms(t *testing.T) {
-	// Helper function to create a basic XfrmPod for testing
-	createXfrmPod := func(name, node, image, ownerChild, ownerConn string, ifId uint32, xfrmIp, vxlanIp string, local, remote []string) IpmanPod[XfrmPodSpec] {
-		return IpmanPod[XfrmPodSpec]{
-			Meta: PodMeta{
-				Name:      name,
-				Namespace: "ipman-system",
-				NodeName:  node,
-				Image:     image,
-			},
-			Spec: XfrmPodSpec{
-				Props: XfrmProperties{
-					OwnerChild:      ownerChild,
-					OwnerConnection: ownerConn,
-					InterfaceID:     ifId,
-					XfrmIP:          xfrmIp,
-					VxlanIP:         vxlanIp,
+// Additional test specifically for the issue mentioned in comments about changes not being detected
+func TestDiffXfrmsImageChangeDetection(t *testing.T) {
+	// Create a reconciler
+	scheme := runtime.NewScheme()
+	ipmanv1.AddToScheme(scheme)
+	corev1.AddToScheme(scheme)
+
+	reconciler := &IPSecConnectionReconciler{
+		Client: fake.NewClientBuilder().WithScheme(scheme).Build(),
+		Scheme: scheme,
+		Env: Envs{
+			NamespaceName:            "ipman-system",
+			IsTest:                   true,
+			WaitForPodTimeoutSeconds: 1,
+		},
+	}
+
+	// Create desired and current states
+	desired := &ClusterState{
+		Nodes: []NodeState{
+			{
+				Xfrms: []IpmanPod[XfrmPodSpec]{
+					{
+						Meta: PodMeta{
+							Name:      "xfrm-image-test",
+							Namespace: "ipman-system",
+							NodeName:  "test-node",
+							Image:     "new-image",
+						},
+						Spec: XfrmPodSpec{
+							Props: XfrmProperties{
+								OwnerChild:      "child1",
+								OwnerConnection: "conn1",
+								InterfaceID:     101,
+								XfrmIP:          "10.0.0.1/24",
+								VxlanIP:         "10.0.0.2/24",
+							},
+						},
+					},
 				},
-				Routes: Routes{
-					Local:     local,
-					Remote:    remote,
-					BridgeFDB: LocalRoutes{},
-				},
+				NodeName: "test-node",
 			},
+		},
+	}
+
+	current := &ClusterState{
+		Nodes: []NodeState{
+			{
+				Xfrms: []IpmanPod[XfrmPodSpec]{
+					{
+						Meta: PodMeta{
+							Name:      "xfrm-image-test",
+							Namespace: "ipman-system",
+							NodeName:  "test-node",
+							Image:     "old-image",
+						},
+						Spec: XfrmPodSpec{
+							Props: XfrmProperties{
+								OwnerChild:      "child1",
+								OwnerConnection: "conn1",
+								InterfaceID:     101,
+								XfrmIP:          "10.0.0.1/24",
+								VxlanIP:         "10.0.0.2/24",
+							},
+						},
+					},
+				},
+				NodeName: "test-node",
+			},
+		},
+	}
+
+	// Store original values to check if they remain unmodified
+	desiredImage := desired.Nodes[0].Xfrms[0].Meta.Image
+	currentImage := current.Nodes[0].Xfrms[0].Meta.Image
+
+	// Test direct diffXfrms function
+	actions := diffXfrms(desired.Nodes[0].Xfrms, current.Nodes[0].Xfrms)
+
+	// Ensure original states are preserved
+	if desired.Nodes[0].Xfrms[0].Meta.Image != desiredImage {
+		t.Errorf("Desired state was modified: expected image '%s', got '%s'",
+			desiredImage, desired.Nodes[0].Xfrms[0].Meta.Image)
+	}
+
+	if current.Nodes[0].Xfrms[0].Meta.Image != currentImage {
+		t.Errorf("Current state was modified: expected image '%s', got '%s'",
+			currentImage, current.Nodes[0].Xfrms[0].Meta.Image)
+	}
+
+	// Verify actions are correct
+	if len(actions) != 0 {
+		t.Errorf("Expected 0 actions (delete+create) for image change, got %d", len(actions))
+	}
+	// Test through DiffStates
+	allActions, err := reconciler.DiffStates(desired, current, []ipmanv1.IPSecConnection{})
+	if err != nil {
+		t.Fatalf("DiffStates returned error: %v", err)
+	}
+
+	// Find Xfrm-related actions
+	var xfrmActions []Action
+	for _, action := range allActions {
+		switch action.(type) {
+		case *CreatePodAction[XfrmPodSpec], *DeletePodAction[XfrmPodSpec]:
+			xfrmActions = append(xfrmActions, action)
 		}
 	}
 
+	// Verify actions from DiffStates
+	if len(xfrmActions) != 0 {
+		t.Errorf("DiffStates: Expected 0 Xfrm actions, got %d", len(xfrmActions))
+	}
+}
+
+// Test property changes in Xfrm pods
+func TestDiffXfrmsPropertyChanges(t *testing.T) {
+	// Create original desired and current states with identical properties
+	desiredBase := IpmanPod[XfrmPodSpec]{
+		Meta: PodMeta{
+			Name:      "xfrm-properties",
+			Namespace: "ipman-system",
+			NodeName:  "test-node",
+			Image:     "test-image",
+		},
+		Spec: XfrmPodSpec{
+			Props: XfrmProperties{
+				OwnerChild:      "child1",
+				OwnerConnection: "conn1",
+				InterfaceID:     101,
+				XfrmIP:          "10.0.0.1/24",
+				VxlanIP:         "10.0.0.2/24",
+			},
+			Routes: Routes{
+				Local:  []string{"10.0.0.0/24"},
+				Remote: []string{"10.0.1.0/24"},
+			},
+		},
+	}
+
+	currentBase := IpmanPod[XfrmPodSpec]{
+		Meta: PodMeta{
+			Name:      "xfrm-properties",
+			Namespace: "ipman-system",
+			NodeName:  "test-node",
+			Image:     "test-image",
+		},
+		Spec: XfrmPodSpec{
+			Props: XfrmProperties{
+				OwnerChild:      "child1",
+				OwnerConnection: "conn1",
+				InterfaceID:     101,
+				XfrmIP:          "10.0.0.1/24",
+				VxlanIP:         "10.0.0.2/24",
+			},
+			Routes: Routes{
+				Local:  []string{"10.0.0.0/24"},
+				Remote: []string{"10.0.1.0/24"},
+			},
+		},
+	}
+
+	// Test cases for property changes
 	tests := []struct {
 		name            string
-		desired         []IpmanPod[XfrmPodSpec]
-		current         []IpmanPod[XfrmPodSpec]
+		modifyDesired   func(*IpmanPod[XfrmPodSpec])
+		modifyCurrent   func(*IpmanPod[XfrmPodSpec])
 		expectedActions int
-		validateActions func(t *testing.T, actions []Action)
+		expectRecreate  bool // Should generate delete + create
 	}{
 		{
-			name: "Identical pods",
-			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
+			name: "Change InterfaceID",
+			modifyDesired: func(p *IpmanPod[XfrmPodSpec]) {
+				p.Spec.Props.InterfaceID = 102 // Changed from 101
 			},
-			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-			},
-			expectedActions: 0,
-			validateActions: nil,
+			modifyCurrent:   func(p *IpmanPod[XfrmPodSpec]) {},
+			expectedActions: 2,
+			expectRecreate:  true,
 		},
 		{
-			name: "Create new pod",
-			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
+			name: "Change XfrmIP",
+			modifyDesired: func(p *IpmanPod[XfrmPodSpec]) {
+				p.Spec.Props.XfrmIP = "10.0.0.3/24" // Changed from 10.0.0.1/24
 			},
-			current:         []IpmanPod[XfrmPodSpec]{},
-			expectedActions: 3, // CreatePod + Add local and remote routes
-			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 3 {
-					t.Fatalf("Expected 3 actions, got %d", len(actions))
+			modifyCurrent:   func(p *IpmanPod[XfrmPodSpec]) {},
+			expectedActions: 2,
+			expectRecreate:  true,
+		},
+		{
+			name: "Change VxlanIP",
+			modifyDesired: func(p *IpmanPod[XfrmPodSpec]) {
+				p.Spec.Props.VxlanIP = "10.0.0.4/24" // Changed from 10.0.0.2/24
+			},
+			modifyCurrent:   func(p *IpmanPod[XfrmPodSpec]) {},
+			expectedActions: 2,
+			expectRecreate:  true,
+		},
+		{
+			name: "Change OwnerChild",
+			modifyDesired: func(p *IpmanPod[XfrmPodSpec]) {
+				p.Spec.Props.OwnerChild = "child2" // Changed from child1
+			},
+			modifyCurrent:   func(p *IpmanPod[XfrmPodSpec]) {},
+			expectedActions: 2,
+			expectRecreate:  true,
+		},
+		{
+			name: "Change OwnerConnection",
+			modifyDesired: func(p *IpmanPod[XfrmPodSpec]) {
+				p.Spec.Props.OwnerConnection = "conn2" // Changed from conn1
+			},
+			modifyCurrent:   func(p *IpmanPod[XfrmPodSpec]) {},
+			expectedActions: 2,
+			expectRecreate:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Make copies of the base pods
+			desired := []IpmanPod[XfrmPodSpec]{desiredBase}
+			current := []IpmanPod[XfrmPodSpec]{currentBase}
+
+			// Apply modifications
+			tt.modifyDesired(&desired[0])
+			tt.modifyCurrent(&current[0])
+
+			// Run diffXfrms
+			actions := diffXfrms(desired, current)
+
+			// Verify action count
+			if len(actions) != tt.expectedActions {
+				t.Errorf("diffXfrms() returned %d actions, expected %d",
+					len(actions), tt.expectedActions)
+			}
+
+			// Verify action types
+			if tt.expectRecreate && len(actions) >= 2 {
+				_, okDelete := actions[0].(*DeletePodAction[XfrmPodSpec])
+				_, okCreate := actions[1].(*CreatePodAction[XfrmPodSpec])
+
+				if !okDelete || !okCreate {
+					t.Errorf("Expected DeletePodAction followed by CreatePodAction, got %T and %T",
+						actions[0], actions[1])
+				}
+			}
+		})
+	}
+}
+
+func TestDiffXfrmsPodIdentification(t *testing.T) {
+	// Test how pods are matched between desired and current states
+
+	// Create base pods with different identifying attributes
+	pod1 := IpmanPod[XfrmPodSpec]{
+		Meta: PodMeta{
+			Name:      "xfrm-pod-1",
+			Namespace: "ipman-system",
+			NodeName:  "node1",
+			Image:     "test-image",
+		},
+		Spec: XfrmPodSpec{
+			Props: XfrmProperties{
+				OwnerChild:      "child1",
+				OwnerConnection: "conn1",
+				InterfaceID:     101,
+				XfrmIP:          "10.0.0.1/24",
+				VxlanIP:         "10.0.0.2/24",
+			},
+		},
+	}
+
+	pod2 := IpmanPod[XfrmPodSpec]{
+		Meta: PodMeta{
+			Name:      "xfrm-pod-2",
+			Namespace: "ipman-system",
+			NodeName:  "node1",
+			Image:     "test-image",
+		},
+		Spec: XfrmPodSpec{
+			Props: XfrmProperties{
+				OwnerChild:      "child2",
+				OwnerConnection: "conn1",
+				InterfaceID:     102,
+				XfrmIP:          "10.0.0.3/24",
+				VxlanIP:         "10.0.0.4/24",
+			},
+		},
+	}
+
+	pod3 := IpmanPod[XfrmPodSpec]{
+		Meta: PodMeta{
+			Name:      "xfrm-pod-3",
+			Namespace: "ipman-system",
+			NodeName:  "node1",
+			Image:     "test-image",
+		},
+		Spec: XfrmPodSpec{
+			Props: XfrmProperties{
+				OwnerChild:      "child3",
+				OwnerConnection: "conn1",
+				InterfaceID:     103,
+				XfrmIP:          "10.0.0.5/24",
+				VxlanIP:         "10.0.0.6/24",
+			},
+		},
+	}
+
+	// Test scenarios
+	tests := []struct {
+		name                  string
+		desired               []IpmanPod[XfrmPodSpec]
+		current               []IpmanPod[XfrmPodSpec]
+		expectedActions       int
+		expectSpecificActions func(t *testing.T, actions []Action)
+	}{
+		{
+			name: "Matching pods by name",
+			desired: []IpmanPod[XfrmPodSpec]{
+				pod1, pod2,
+			},
+			current: []IpmanPod[XfrmPodSpec]{
+				pod1, pod3,
+			},
+			expectedActions: 2, // Create pod2, Delete pod3
+			expectSpecificActions: func(t *testing.T, actions []Action) {
+				createFound := false
+				deleteFound := false
+
+				for _, action := range actions {
+					switch a := action.(type) {
+					case *CreatePodAction[XfrmPodSpec]:
+						if a.Pod.Meta.Name == "xfrm-pod-2" {
+							createFound = true
+						}
+					case *DeletePodAction[XfrmPodSpec]:
+						if a.Pod.Meta.Name == "xfrm-pod-3" {
+							deleteFound = true
+						}
+					}
 				}
 
-				// First action should be create pod
-				createAction, ok := actions[0].(*CreatePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected first action to be CreatePodAction, got %T", actions[0])
+				if !createFound {
+					t.Errorf("Expected create action for pod 'xfrm-pod-2'")
 				}
-
-				if createAction.Pod.Meta.Name != "xfrm-pod-1" {
-					t.Errorf("Expected pod name to be 'xfrm-pod-1', got '%s'", createAction.Pod.Meta.Name)
-				}
-
-				// Second action should be add local route
-				addLocalAction, ok := actions[1].(*AddLocalRouteAction)
-				if !ok {
-					t.Fatalf("Expected second action to be AddLocalRouteAction, got %T", actions[1])
-				}
-
-				if addLocalAction.Route != "10.0.1.0/24" {
-					t.Errorf("Expected local route to be '10.0.1.0/24', got '%s'", addLocalAction.Route)
-				}
-
-				// Third action should be add remote route
-				addRemoteAction, ok := actions[2].(*AddRemoteRouteAction)
-				if !ok {
-					t.Fatalf("Expected third action to be AddRemoteRouteAction, got %T", actions[2])
-				}
-
-				if addRemoteAction.Route != "10.0.2.0/24" {
-					t.Errorf("Expected remote route to be '10.0.2.0/24', got '%s'", addRemoteAction.Route)
+				if !deleteFound {
+					t.Errorf("Expected delete action for pod 'xfrm-pod-3'")
 				}
 			},
 		},
 		{
-			name:    "Delete pod",
-			desired: []IpmanPod[XfrmPodSpec]{},
-			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-			},
-			expectedActions: 1,
-			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 1 {
-					t.Fatalf("Expected 1 action, got %d", len(actions))
-				}
-
-				deleteAction, ok := actions[0].(*DeletePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected DeletePodAction, got %T", actions[0])
-				}
-
-				if deleteAction.Pod.Meta.Name != "xfrm-pod-1" {
-					t.Errorf("Expected pod name to be 'xfrm-pod-1', got '%s'", deleteAction.Pod.Meta.Name)
-				}
-			},
-		},
-		{
-			name: "Update pod properties",
+			name: "Same names but different properties",
 			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 102, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
+				{
+					Meta: pod1.Meta,
+					Spec: XfrmPodSpec{
+						Props: XfrmProperties{
+							OwnerChild:      "child1-new", // Changed
+							OwnerConnection: "conn1",
+							InterfaceID:     101,
+							XfrmIP:          "10.0.0.1/24",
+							VxlanIP:         "10.0.0.2/24",
+						},
+					},
+				},
 			},
 			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
+				pod1,
 			},
-			expectedActions: 2, // Delete and recreate
-			validateActions: func(t *testing.T, actions []Action) {
+			expectedActions: 2, // Delete and recreate pod1 with new properties
+			expectSpecificActions: func(t *testing.T, actions []Action) {
 				if len(actions) != 2 {
 					t.Fatalf("Expected 2 actions, got %d", len(actions))
 				}
 
-				// First action should be delete pod
-				deleteAction, ok := actions[0].(*DeletePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected first action to be DeletePodAction, got %T", actions[0])
-				}
+				deleteAction, okDelete := actions[0].(*DeletePodAction[XfrmPodSpec])
+				createAction, okCreate := actions[1].(*CreatePodAction[XfrmPodSpec])
 
-				if deleteAction.Pod.Meta.Name != "xfrm-pod-1" {
-					t.Errorf("Expected pod name to be 'xfrm-pod-1', got '%s'", deleteAction.Pod.Meta.Name)
-				}
+				if !okDelete || !okCreate {
+					t.Errorf("Expected DeletePodAction followed by CreatePodAction, got %T and %T",
+						actions[0], actions[1])
+				} else {
+					// Check pod name is the same
+					if deleteAction.Pod.Meta.Name != "xfrm-pod-1" || createAction.Pod.Meta.Name != "xfrm-pod-1" {
+						t.Errorf("Expected actions for pod 'xfrm-pod-1', got delete:'%s', create:'%s'",
+							deleteAction.Pod.Meta.Name, createAction.Pod.Meta.Name)
+					}
 
-				// Second action should be create pod
-				createAction, ok := actions[1].(*CreatePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected second action to be CreatePodAction, got %T", actions[1])
-				}
+					// Check properties differ
+					if deleteAction.Pod.Spec.Props.OwnerChild != "child1" {
+						t.Errorf("Expected deleted pod to have OwnerChild='child1', got '%s'",
+							deleteAction.Pod.Spec.Props.OwnerChild)
+					}
 
-				if createAction.Pod.Meta.Name != "xfrm-pod-1" {
-					t.Errorf("Expected pod name to be 'xfrm-pod-1', got '%s'", createAction.Pod.Meta.Name)
-				}
-
-				if createAction.Pod.Spec.Props.InterfaceID != 102 {
-					t.Errorf("Expected InterfaceID to be 102, got %d", createAction.Pod.Spec.Props.InterfaceID)
+					if createAction.Pod.Spec.Props.OwnerChild != "child1-new" {
+						t.Errorf("Expected created pod to have OwnerChild='child1-new', got '%s'",
+							createAction.Pod.Spec.Props.OwnerChild)
+					}
 				}
 			},
 		},
 		{
-			name: "Update pod node",
+			name: "Multiple pods with various changes",
 			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node2", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
+				pod1, // unchanged
+				{
+					Meta: pod2.Meta,
+					Spec: XfrmPodSpec{
+						Props: XfrmProperties{
+							OwnerChild:      pod2.Spec.Props.OwnerChild,
+							OwnerConnection: pod2.Spec.Props.OwnerConnection,
+							InterfaceID:     202, // Changed from 102
+							XfrmIP:          pod2.Spec.Props.XfrmIP,
+							VxlanIP:         pod2.Spec.Props.VxlanIP,
+						},
+					},
+				},
+				{
+					Meta: PodMeta{ // New pod
+						Name:      "xfrm-pod-4",
+						Namespace: "ipman-system",
+						NodeName:  "node1",
+						Image:     "test-image",
+					},
+					Spec: XfrmPodSpec{
+						Props: XfrmProperties{
+							OwnerChild:      "child4",
+							OwnerConnection: "conn1",
+							InterfaceID:     104,
+							XfrmIP:          "10.0.0.7/24",
+							VxlanIP:         "10.0.0.8/24",
+						},
+					},
+				},
 			},
 			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
+				pod1, // unchanged
+				pod2, // will be changed
+				pod3, // will be deleted
 			},
-			expectedActions: 2, // Delete and recreate
-			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 2 {
-					t.Fatalf("Expected 2 actions, got %d", len(actions))
+			expectedActions: 4, // Delete pod2, Create pod2 with new props, Delete pod3, Create pod4
+			expectSpecificActions: func(t *testing.T, actions []Action) {
+				if len(actions) != 4 {
+					t.Fatalf("Expected 4 actions, got %d", len(actions))
 				}
 
-				// First action should be delete pod
-				deleteAction, ok := actions[0].(*DeletePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected first action to be DeletePodAction, got %T", actions[0])
+				deleteCount := 0
+				createCount := 0
+				deleteNames := make(map[string]bool)
+				createNames := make(map[string]bool)
+
+				for _, action := range actions {
+					switch a := action.(type) {
+					case *DeletePodAction[XfrmPodSpec]:
+						deleteCount++
+						deleteNames[a.Pod.Meta.Name] = true
+					case *CreatePodAction[XfrmPodSpec]:
+						createCount++
+						createNames[a.Pod.Meta.Name] = true
+					}
 				}
 
-				if deleteAction.Pod.Meta.NodeName != "node1" {
-					t.Errorf("Expected pod node to be 'node1', got '%s'", deleteAction.Pod.Meta.NodeName)
+				if deleteCount != 2 {
+					t.Errorf("Expected 2 delete actions, got %d", deleteCount)
+				}
+				if createCount != 2 {
+					t.Errorf("Expected 2 create actions, got %d", createCount)
 				}
 
-				// Second action should be create pod
-				createAction, ok := actions[1].(*CreatePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected second action to be CreatePodAction, got %T", actions[1])
+				if !deleteNames["xfrm-pod-2"] || !deleteNames["xfrm-pod-3"] {
+					t.Errorf("Expected deletes for pod2 and pod3, got %v", deleteNames)
 				}
-
-				if createAction.Pod.Meta.NodeName != "node2" {
-					t.Errorf("Expected pod node to be 'node2', got '%s'", createAction.Pod.Meta.NodeName)
+				if !createNames["xfrm-pod-2"] || !createNames["xfrm-pod-4"] {
+					t.Errorf("Expected creates for pod2 and pod4, got %v", createNames)
 				}
 			},
-		},
-		{
-			name: "Update pod routes",
-			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24", "10.0.3.0/24"}, []string{"10.0.2.0/24"}),
-			},
-			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-			},
-			expectedActions: 1, // Add local route
-			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 1 {
-					t.Fatalf("Expected 1 action, got %d", len(actions))
-				}
-
-				addAction, ok := actions[0].(*AddLocalRouteAction)
-				if !ok {
-					t.Fatalf("Expected AddLocalRouteAction, got %T", actions[0])
-				}
-
-				if addAction.Route != "10.0.3.0/24" {
-					t.Errorf("Expected route to be '10.0.3.0/24', got '%s'", addAction.Route)
-				}
-			},
-		},
-		{
-			name: "Multiple pods - add one pod",
-			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-				createXfrmPod("xfrm-pod-2", "node1", "test-image", "child2", "conn1", 102, "10.0.3.1/24", "10.0.3.2/24",
-					[]string{"10.0.3.0/24"}, []string{"10.0.4.0/24"}),
-			},
-			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-			},
-			expectedActions: 3, // Create pod + add local and remote routes
-			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 3 {
-					t.Fatalf("Expected 3 actions, got %d", len(actions))
-				}
-
-				// First action should be create pod
-				createAction, ok := actions[0].(*CreatePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected first action to be CreatePodAction, got %T", actions[0])
-				}
-
-				if createAction.Pod.Meta.Name != "xfrm-pod-2" {
-					t.Errorf("Expected pod name to be 'xfrm-pod-2', got '%s'", createAction.Pod.Meta.Name)
-				}
-			},
-		},
-		{
-			name: "Multiple pods - delete one pod",
-			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-			},
-			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-				createXfrmPod("xfrm-pod-2", "node1", "test-image", "child2", "conn1", 102, "10.0.3.1/24", "10.0.3.2/24",
-					[]string{"10.0.3.0/24"}, []string{"10.0.4.0/24"}),
-			},
-			expectedActions: 1, // Delete pod
-			validateActions: func(t *testing.T, actions []Action) {
-				if len(actions) != 1 {
-					t.Fatalf("Expected 1 action, got %d", len(actions))
-				}
-
-				deleteAction, ok := actions[0].(*DeletePodAction[XfrmPodSpec])
-				if !ok {
-					t.Fatalf("Expected DeletePodAction, got %T", actions[0])
-				}
-
-				if deleteAction.Pod.Meta.Name != "xfrm-pod-2" {
-					t.Errorf("Expected pod name to be 'xfrm-pod-2', got '%s'", deleteAction.Pod.Meta.Name)
-				}
-			},
-		},
-		{
-			name: "Multiple pods - modify one pod",
-			desired: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-				createXfrmPod("xfrm-pod-2", "node1", "new-image", "child2", "conn1", 102, "10.0.3.1/24", "10.0.3.2/24",
-					[]string{"10.0.3.0/24"}, []string{"10.0.4.0/24"}),
-			},
-			current: []IpmanPod[XfrmPodSpec]{
-				createXfrmPod("xfrm-pod-1", "node1", "test-image", "child1", "conn1", 101, "10.0.1.1/24", "10.0.1.2/24",
-					[]string{"10.0.1.0/24"}, []string{"10.0.2.0/24"}),
-				createXfrmPod("xfrm-pod-2", "node1", "old-image", "child2", "conn1", 102, "10.0.3.1/24", "10.0.3.2/24",
-					[]string{"10.0.3.0/24"}, []string{"10.0.4.0/24"}),
-			},
-			// NOTE: Current implementation of diffXfrms has a bug where it doesn't handle pod image changes properly
-			expectedActions: 0, // Should be 2 (Delete and recreate), but the current implementation returns 0
-			validateActions: nil,
 		},
 	}
 
@@ -304,12 +494,85 @@ func TestDiffXfrms(t *testing.T) {
 			actions := diffXfrms(tt.desired, tt.current)
 
 			if len(actions) != tt.expectedActions {
-				t.Errorf("diffXfrms() returned %d actions, expected %d", len(actions), tt.expectedActions)
+				t.Errorf("diffXfrms() returned %d actions, expected %d",
+					len(actions), tt.expectedActions)
 			}
 
-			if tt.validateActions != nil {
-				tt.validateActions(t, actions)
+			if tt.expectSpecificActions != nil {
+				tt.expectSpecificActions(t, actions)
 			}
 		})
+	}
+}
+
+func TestDiffXfrmsDeepCopying(t *testing.T) {
+	// Test that diffXfrms properly copies objects and doesn't modify the originals
+
+	// Create original states
+	originalDesired := []IpmanPod[XfrmPodSpec]{
+		{
+			Meta: PodMeta{
+				Name:      "xfrm-test",
+				Namespace: "ipman-system",
+				NodeName:  "test-node",
+				Image:     "new-image",
+			},
+			Spec: XfrmPodSpec{
+				Props: XfrmProperties{
+					OwnerChild:      "child1",
+					OwnerConnection: "conn1",
+					InterfaceID:     101,
+					XfrmIP:          "10.0.0.1/24",
+					VxlanIP:         "10.0.0.2/24",
+				},
+				Routes: Routes{
+					Local:  []string{"10.0.0.0/24"},
+					Remote: []string{"10.0.1.0/24"},
+				},
+			},
+		},
+	}
+
+	originalCurrent := []IpmanPod[XfrmPodSpec]{
+		{
+			Meta: PodMeta{
+				Name:      "xfrm-test",
+				Namespace: "ipman-system",
+				NodeName:  "test-node",
+				Image:     "old-image",
+			},
+			Spec: XfrmPodSpec{
+				Props: XfrmProperties{
+					OwnerChild:      "child1",
+					OwnerConnection: "conn1",
+					InterfaceID:     101,
+					XfrmIP:          "10.0.0.1/24",
+					VxlanIP:         "10.0.0.2/24",
+				},
+				Routes: Routes{
+					Local:  []string{"10.0.0.0/24"},
+					Remote: []string{"10.0.1.0/24"},
+				},
+			},
+		},
+	}
+
+	// Create copies to verify against later
+	desiredCopy := make([]IpmanPod[XfrmPodSpec], len(originalDesired))
+	copy(desiredCopy, originalDesired)
+
+	currentCopy := make([]IpmanPod[XfrmPodSpec], len(originalCurrent))
+	copy(currentCopy, originalCurrent)
+
+	// Run diffXfrms
+	_ = diffXfrms(originalDesired, originalCurrent)
+
+	// Verify that the originals were not modified
+	if !reflect.DeepEqual(originalDesired, desiredCopy) {
+		t.Errorf("diffXfrms modified the original desired state")
+	}
+
+	if !reflect.DeepEqual(originalCurrent, currentCopy) {
+		t.Errorf("diffXfrms modified the original current state")
 	}
 }

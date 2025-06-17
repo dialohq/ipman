@@ -67,6 +67,19 @@ func (e *RequestError) Error() string {
 	return fmt.Sprintf("Error while trying to %s %s: %s", e.ActionType, e.Resource, e.Err.Error())
 }
 
+// InternalError represents an error that is not the user's fault
+type InternalError struct {
+	Environment any    `json:"environment"`
+	Location    string `json:"location"`
+	Action      string `json:"action"`
+	Err         error  `json:"error"`
+}
+
+// Error returns a formatted error string for RequestError
+func (e *InternalError) Error() string {
+	return fmt.Sprintf("Internal error occured in '%s' while doing '%s': %s. Please open an issue on github with this error message. Env: %+v", e.Location, e.Action, e.Err.Error(), e.Environment)
+}
+
 // GetClusterNodes returns a list of all node names in the cluster
 func (r *IPSecConnectionReconciler) GetClusterNodes(ctx context.Context) ([]string, error) {
 	nl := &corev1.NodeList{}
@@ -89,7 +102,16 @@ func (r *IPSecConnectionReconciler) GetClusterPodsByType(ctx context.Context, po
 		ipmanv1.LabelPodType: podType,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("Error creating label selector, this is a bug in the operator: %w", err)
+		e := InternalError{
+			Location: "GetClusterPodsByType",
+			Action:   "Creating a label selector",
+			Environment: map[string]any{
+				"podList": ps,
+				"podType": podType,
+			},
+			Err: err,
+		}
+		return nil, &e
 	}
 	opts := client.ListOptions{
 		LabelSelector: vs,
@@ -115,8 +137,15 @@ func ExtractCharonVolumeSocketPath(p *corev1.Pod) string {
 	}
 
 	if CharonSocketVolume == nil {
-		// This should never happen
-		fmt.Println("Volume with charon socket doesn't exist on charon pod!!")
+		e := InternalError{
+			Location: "ExtractCharonVolumeSocketPath",
+			Action:   "Finding charon socket",
+			Environment: map[string]any{
+				"pod": *p,
+			},
+			Err: fmt.Errorf("CharonSocketVolume is nil"),
+		}
+		fmt.Println(e.Error())
 	}
 	return CharonSocketVolume.HostPath.Path
 }
@@ -154,7 +183,15 @@ func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
 	err := json.Unmarshal([]byte(p.Annotations[ipmanv1.AnnotationSpec]), &cs)
 	if err != nil {
 		logger := log.FromContext(context.Background())
-		logger.Error(err, "Couldn't unmarshal spec annotation of proxy pod")
+		e := &InternalError{
+			Location: "ProxyFromPod",
+			Action:   "Unmarshaling spec annotation",
+			Err:      err,
+			Environment: map[string]any{
+				"Pod": *p,
+			},
+		}
+		logger.Error(e, "Couldn't unmarshal spec annotation of proxy pod")
 	}
 	return IpmanPod[ProxyPodSpec]{
 		Spec: ProxyPodSpec{
@@ -187,7 +224,7 @@ func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionRec
 
 // XfrmFromPod converts a Kubernetes Pod into an IpmanPod with XfrmPodSpec,
 // extracting properties and routes from pod annotations
-func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
+func (r *IPSecConnectionReconciler) XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 	specJSON := p.Annotations[ipmanv1.AnnotationSpec]
 
 	spec := &XfrmPodSpec{}
@@ -195,13 +232,21 @@ func XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
 	if err != nil {
 		fmt.Printf("Error unmarshaling XfrmPodSpec: %v\n", err)
 	}
-
+	fmt.Printf("%+v\n", spec)
+	nid, err := r.GetNodeID(p.Spec.NodeName)
+	// has to exist since there is a pod there
+	for err != nil {
+		time.Sleep(1 * time.Second)
+		fmt.Printf("Error getting node id of node '%s': %s\n", p.Spec.NodeName, err.Error())
+		nid, err = r.GetNodeID(p.Spec.NodeName)
+	}
 	result := IpmanPod[XfrmPodSpec]{
 		Meta: PodMeta{
 			Name:      p.Name,
 			Namespace: p.Namespace,
 			IP:        p.Status.PodIP,
 			NodeName:  p.Spec.NodeName,
+			NodeID:    nid,
 			Image:     ExtractContainerImage(p, ipmanv1.XfrminionContainerName),
 		},
 		Spec: *spec,
@@ -300,7 +345,7 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 		return nil, err
 	}
 
-	xfrms, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueXfrmPod, XfrmFromPod)
+	xfrms, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueXfrmPod, r.XfrmFromPod)
 	if err != nil {
 		return nil, err
 	}
@@ -421,7 +466,7 @@ func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection, 
 			}
 		}
 		if len(configs) == 0 {
-			return []IpmanPod[ProxyPodSpec]{}
+			continue
 		}
 
 		prx := IpmanPod[ProxyPodSpec]{}
@@ -579,6 +624,10 @@ func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []
 		return nil
 	}
 	for _, conn := range cl {
+		nodeid, err := r.GetNodeID(conn.Spec.NodeName)
+		if err != nil {
+			logger.Error(err, "Couldn't find node with specified name", "nodename", conn.Spec.NodeName)
+		}
 		for _, c := range conn.Spec.Children {
 			ws := workers[conn.Name][c.Name]
 			bfdbs := LocalRoutes{}
@@ -595,8 +644,8 @@ func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []
 					VxlanIP:         c.VxlanIP,
 				},
 				Routes: Routes{
-					Local:     c.LocalIps,
-					Remote:    c.RemoteIps,
+					Local:     c.LocalIPs,
+					Remote:    c.RemoteIPs,
 					BridgeFDB: bfdbs,
 				},
 			}
@@ -604,6 +653,7 @@ func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []
 				Name:      strings.Join([]string{ipmanv1.XfrmPodName, c.Name, conn.Name}, "-"),
 				Namespace: r.Env.NamespaceName,
 				NodeName:  conn.Spec.NodeName,
+				NodeID:    nodeid,
 				Image:     r.Env.XfrminionImage,
 			}
 			xfrms = append(xfrms, x)
@@ -738,6 +788,9 @@ func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *Ipman
 }
 
 func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[ProxyPodSpec], current *IpmanPod[ProxyPodSpec], conns []ipmanv1.IPSecConnection) ([]Action, error) {
+	if desired == nil && current == nil {
+		return []Action{}, nil
+	}
 	if desired == nil {
 		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}}, nil
 	}
@@ -974,6 +1027,10 @@ func compareXfrmPods(a, b IpmanPod[XfrmPodSpec]) bool {
 func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 	logger := log.FromContext(context.Background())
 
+	cl, _ := diff.Diff(current, desired)
+	for _, c := range cl {
+		fmt.Printf("%+v\n", c)
+	}
 	compareXfrmPodsLists := func(desired, current []IpmanPod[XfrmPodSpec]) bool {
 		if len(desired) != len(current) {
 			return false
@@ -1155,6 +1212,7 @@ func (r *IPSecConnectionReconciler) UpdateStatus(ctx context.Context) (*time.Dur
 		}
 		err = r.Status().Update(ctx, &ipsc)
 		if err != nil {
+			fmt.Println("Couldn't update status", err)
 			return rq, err
 		}
 	}
@@ -1170,7 +1228,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 	if !apierrors.IsNotFound(err) {
 		if err != nil {
 			logger.Error(err, "Error fetching pod")
-			return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil
+			return ctrl.Result{RequeueAfter: time.Duration(5 * time.Second)}, err
 		} else {
 			if pod.Status.PodIP == "" {
 				logger.Info("Pod doesn't have ip yet, requeuing...")
@@ -1186,12 +1244,11 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		ctr += 1
 	}
 
-	if ctr == ipmanv1.UpdateStatusMaxRetries {
-		logger.Info("Failed to update status after max tries", "max-tries", ipmanv1.UpdateStatusMaxRetries)
-		rq = nil
-	}
 	if err != nil {
-		logger.Error(err, "Error updating status")
+		if ctr == ipmanv1.UpdateStatusMaxRetries+1 {
+			dur := time.Duration(5 * time.Second)
+			return res(&dur), fmt.Errorf("Error updating status after %d tries: %w", ipmanv1.UpdateStatusMaxRetries, err)
+		}
 	}
 	currentState, err := r.GetClusterState(ctx)
 	if errors.Is(err, &RequestError{}) {
@@ -1222,7 +1279,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		err = a.Do(ctx, r)
 		if err != nil {
 			logger.Info("Error executing action", "action", a, "msg", err)
-			return res(rq, time.Duration(5*time.Second)), nil
+			return res(rq, time.Duration(5*time.Second)), err
 		}
 	}
 

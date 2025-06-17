@@ -3,6 +3,8 @@ package controller
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"reflect"
 	"testing"
@@ -43,8 +45,8 @@ var (
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"10.0.2.0/24"},
-					RemoteIps: []string{"10.0.1.0/24"},
+					LocalIPs:  []string{"10.0.2.0/24"},
+					RemoteIPs: []string{"10.0.1.0/24"},
 					XfrmIP:    "10.0.2.1/24",
 					VxlanIP:   "10.0.2.2/24",
 					XfrmIfId:  101,
@@ -58,8 +60,8 @@ var (
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
-					RemoteIps: []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
+					LocalIPs:  []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
+					RemoteIPs: []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
 					XfrmIP:    "10.0.9.1/32",
 					VxlanIP:   "10.0.8.2/32",
 					XfrmIfId:  201,
@@ -94,8 +96,8 @@ var (
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"10.0.2.0/24"},
-					RemoteIps: []string{"10.0.1.0/24"},
+					LocalIPs:  []string{"10.0.2.0/24"},
+					RemoteIPs: []string{"10.0.1.0/24"},
 					XfrmIP:    "10.0.2.1/24",
 					VxlanIP:   "10.0.2.2/24",
 					XfrmIfId:  102,
@@ -109,8 +111,8 @@ var (
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
-					RemoteIps: []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
+					LocalIPs:  []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
+					RemoteIPs: []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
 					XfrmIP:    "10.0.9.1/32",
 					VxlanIP:   "10.0.8.2/32",
 					XfrmIfId:  202,
@@ -144,15 +146,40 @@ var (
 
 func TestCreatingDesiredState(t *testing.T) {
 	ctx := context.Background()
-	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(&c, &c2).Build()
+
+	r.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&c,
+		&c2,
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "localcluster",
+			},
+			Status: corev1.NodeStatus{
+				NodeInfo: corev1.NodeSystemInfo{
+					MachineID: "aaabbbcccdddeeefff",
+				},
+			},
+		},
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "localcluster2",
+			},
+			Status: corev1.NodeStatus{
+				NodeInfo: corev1.NodeSystemInfo{
+					MachineID: "fffeeedddcccbbbaaa",
+				},
+			},
+		},
+	).Build()
 	actualDs := &ClusterState{
 		Nodes: []NodeState{
 			{
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
-						Name:      "charon-pod-localcluster",
+						Name:      "charon-pod-aaabbbcccdddeeefff",
 						Namespace: "ipman-system",
 						NodeName:  "localcluster",
+						NodeID:    "aaabbbcccdddeeefff",
 						Image:     "plan9better/strongswan-charon:0.0.7",
 					},
 					Spec: CharonPodSpec{
@@ -161,18 +188,21 @@ func TestCreatingDesiredState(t *testing.T) {
 				},
 				Proxy: &IpmanPod[ProxyPodSpec]{
 					Meta: PodMeta{
-						Name:      "proxy-pod-localcluster",
+						Name:      "proxy-pod-aaabbbcccdddeeefff",
 						Namespace: "ipman-system",
 						NodeName:  "localcluster",
+						NodeID:    "aaabbbcccdddeeefff",
 						Image:     "caddy:2.10.0-alpine",
 					},
 					Spec: ProxyPodSpec{
 						HostPath: "/var/run/ipman",
+						Configs:  []ipmanv1.IPSecConnectionSpec{c.Spec},
 					},
 				},
 				Xfrms: []IpmanPod[XfrmPodSpec]{
 					{
 						Meta: PodMeta{
+							NodeID:    "aaabbbcccdddeeefff",
 							Name:      "xfrm-pod-3s-sodies-nix",
 							Namespace: "ipman-system",
 							NodeName:  "localcluster",
@@ -198,10 +228,10 @@ func TestCreatingDesiredState(t *testing.T) {
 							Name:      "xfrm-pod-4s-sodies-nix",
 							Namespace: "ipman-system",
 							NodeName:  "localcluster",
+							NodeID:    "aaabbbcccdddeeefff",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
-							// TODO: fill those once we populate them in controller
 							Routes: Routes{
 								Local:     []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
 								Remote:    []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
@@ -217,12 +247,14 @@ func TestCreatingDesiredState(t *testing.T) {
 						},
 					},
 				},
-				NodeName: "localcluster",
+				NodeName:  "localcluster",
+				MachineID: "aaabbbcccdddeeefff",
 			}, {
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
-						Name:      "charon-pod-localcluster2",
+						Name:      "charon-pod-fffeeedddcccbbbaaa",
 						Namespace: "ipman-system",
+						NodeID:    "fffeeedddcccbbbaaa",
 						NodeName:  "localcluster2",
 						Image:     "plan9better/strongswan-charon:0.0.7",
 					},
@@ -232,13 +264,15 @@ func TestCreatingDesiredState(t *testing.T) {
 				},
 				Proxy: &IpmanPod[ProxyPodSpec]{
 					Meta: PodMeta{
-						Name:      "proxy-pod-localcluster2",
+						Name:      "proxy-pod-fffeeedddcccbbbaaa",
 						Namespace: "ipman-system",
+						NodeID:    "fffeeedddcccbbbaaa",
 						NodeName:  "localcluster2",
 						Image:     "caddy:2.10.0-alpine",
 					},
 					Spec: ProxyPodSpec{
 						HostPath: "/var/run/ipman",
+						Configs:  []ipmanv1.IPSecConnectionSpec{c2.Spec},
 					},
 				},
 				Xfrms: []IpmanPod[XfrmPodSpec]{
@@ -247,6 +281,7 @@ func TestCreatingDesiredState(t *testing.T) {
 							Name:      "xfrm-pod-7s-sodies-nix2",
 							Namespace: "ipman-system",
 							NodeName:  "localcluster2",
+							NodeID:    "fffeeedddcccbbbaaa",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
@@ -268,11 +303,11 @@ func TestCreatingDesiredState(t *testing.T) {
 						Meta: PodMeta{
 							Name:      "xfrm-pod-8s-sodies-nix2",
 							Namespace: "ipman-system",
+							NodeID:    "fffeeedddcccbbbaaa",
 							NodeName:  "localcluster2",
 							Image:     "plan9better/xfrminion:latest-dev",
 						},
 						Spec: XfrmPodSpec{
-							// TODO: fill those once we populate them in controller
 							Routes: Routes{
 								Local:     []string{"10.0.4.4/32", "10.0.9.8/32", "10.0.2.9/32", "10.0.4.3/32", "10.0.3.11/32", "10.0.23.20/32"},
 								Remote:    []string{"10.0.3.1/32", "10.0.3.3/32", "10.0.3.7/32"},
@@ -288,7 +323,8 @@ func TestCreatingDesiredState(t *testing.T) {
 						},
 					},
 				},
-				NodeName: "localcluster2",
+				NodeName:  "localcluster2",
+				MachineID: "fffeeedddcccbbbaaa",
 			},
 		},
 	}
@@ -297,10 +333,17 @@ func TestCreatingDesiredState(t *testing.T) {
 		t.Errorf("Creating desired state returned an error: %v, desired: %v, received: %v", err, actualDs, ds)
 	}
 
+	slices.SortFunc(ds.Nodes, func(a, b NodeState) int {
+		return strings.Compare(a.MachineID, b.MachineID)
+	})
+	slices.SortFunc(actualDs.Nodes, func(a, b NodeState) int {
+		return strings.Compare(a.MachineID, b.MachineID)
+	})
+
 	if !reflect.DeepEqual(ds, actualDs) {
 		d, _ := diff.Diff(actualDs, ds)
 		for _, df := range d {
-			fmt.Printf("%+v", df)
+			fmt.Printf("%+v\n", df)
 		}
 		t.Errorf("States are not equal")
 	}
@@ -364,7 +407,11 @@ func TestDiffStates(t *testing.T) {
 		},
 	}
 
-	actions := DiffStates(desiredState, currentState)
+	testReconciler := createTestReconciler()
+	actions, err := testReconciler.DiffStates(desiredState, currentState, []ipmanv1.IPSecConnection{})
+	if err != nil {
+		t.Fatalf("DiffStates() returned an error: %v", err)
+	}
 	if len(actions) != 0 {
 		t.Errorf("Expected no actions for identical states, got %d actions", len(actions))
 	}
@@ -391,7 +438,10 @@ func TestDiffStates(t *testing.T) {
 		},
 	}
 
-	actions = DiffStates(desiredWithCharon, currentState)
+	actions, err = testReconciler.DiffStates(desiredWithCharon, currentState, []ipmanv1.IPSecConnection{})
+	if err != nil {
+		t.Fatalf("DiffStates() returned an error: %v", err)
+	}
 	if len(actions) != 1 {
 		t.Errorf("Expected 1 action for missing Charon pod, got %d actions", len(actions))
 	}
@@ -444,7 +494,10 @@ func TestDiffStates(t *testing.T) {
 		// Skip this test for now as it's for future functionality
 		// t.Skip("DeletePodAction not fully implemented yet")
 
-		actions = DiffStates(emptyDesired, currentWithCharon)
+		actions, err = testReconciler.DiffStates(emptyDesired, currentWithCharon, []ipmanv1.IPSecConnection{})
+		if err != nil {
+			t.Fatalf("DiffStates() returned an error: %v", err)
+		}
 		if len(actions) != 1 {
 			t.Errorf("Expected 1 delete action, got %d actions", len(actions))
 		}
@@ -457,76 +510,6 @@ func TestDiffStates(t *testing.T) {
 		if deleteAction.Pod.Meta.Name != "charon-pod-to-delete" {
 			t.Errorf("Expected action for pod 'charon-pod-to-delete', got '%s'", deleteAction.Pod.Meta.Name)
 		}
-	})
-
-	// Test case 4: When a pod exists in both states but with different specs, it should be updated
-	// This test is designed for how DiffStates should work in the future
-	currentWithCharonOldSpec := &ClusterState{
-		Nodes: []NodeState{
-			{
-				Charon: &IpmanPod[CharonPodSpec]{
-					Meta: PodMeta{
-						Name:      "charon-pod-to-update",
-						Namespace: "ipman-system",
-						NodeName:  "localcluster",
-						Image:     "old-image",
-					},
-					Spec: CharonPodSpec{
-						HostPath: "/old/path",
-					},
-				},
-				Proxy:    nil,
-				Xfrms:    []IpmanPod[XfrmPodSpec]{},
-				NodeName: "localcluster",
-			},
-		},
-	}
-
-	desiredWithCharonNewSpec := &ClusterState{
-		Nodes: []NodeState{
-			{
-				Charon: &IpmanPod[CharonPodSpec]{
-					Meta: PodMeta{
-						Name:      "charon-pod-to-update",
-						Namespace: "ipman-system",
-						NodeName:  "localcluster",
-						Image:     "new-image",
-					},
-					Spec: CharonPodSpec{
-						HostPath: "/new/path",
-					},
-				},
-				Proxy:    nil,
-				Xfrms:    []IpmanPod[XfrmPodSpec]{},
-				NodeName: "localcluster",
-			},
-		},
-	}
-
-	// This test is expected to fail with the current implementation, but shows what we expect
-	// in the future once UpdatePodAction is properly implemented
-	t.Run("Future: Update pod when specs differ", func(t *testing.T) {
-		// Skip this test for now as it's for future functionality
-		// t.Skip("UpdatePodAction not implemented yet")
-
-		actions = DiffStates(desiredWithCharonNewSpec, currentWithCharonOldSpec)
-		if len(actions) != 2 {
-			t.Errorf("Expected 1 update action, got %d actions", len(actions))
-		}
-
-		// In the future, there should be an UpdatePodAction type
-		// updateAction, ok := actions[0].(UpdatePodAction[CharonPodSpec])
-		// if !ok {
-		//     t.Errorf("Expected UpdatePodAction[CharonPodSpec], got %T", actions[0])
-		// }
-		//
-		// if updateAction.Pod.Meta.Name != "charon-pod-to-update" {
-		//     t.Errorf("Expected action for pod 'charon-pod-to-update', got '%s'", updateAction.Pod.Meta.Name)
-		// }
-		//
-		// if updateAction.Pod.Meta.Image != "new-image" || updateAction.Pod.Spec.HostPath != "/new/path" {
-		//     t.Errorf("Updated pod doesn't have the expected new values")
-		// }
 	})
 }
 
@@ -556,8 +539,8 @@ func TestMultipleIPSecConnections(t *testing.T) {
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"192.168.1.0/24"},
-					RemoteIps: []string{"192.168.2.0/24"},
+					LocalIPs:  []string{"192.168.1.0/24"},
+					RemoteIPs: []string{"192.168.2.0/24"},
 					XfrmIP:    "192.168.1.1/24",
 					VxlanIP:   "192.168.1.2/24",
 					XfrmIfId:  101,
@@ -592,8 +575,8 @@ func TestMultipleIPSecConnections(t *testing.T) {
 					Extra: map[string]string{
 						"esp_proposals": "aes256-sha256-ecp256",
 					},
-					LocalIps:  []string{"192.168.3.0/24"},
-					RemoteIps: []string{"192.168.4.0/24"},
+					LocalIPs:  []string{"192.168.3.0/24"},
+					RemoteIPs: []string{"192.168.4.0/24"},
 					XfrmIP:    "192.168.3.1/24",
 					VxlanIP:   "192.168.3.2/24",
 					XfrmIfId:  102,
@@ -610,7 +593,7 @@ func TestMultipleIPSecConnections(t *testing.T) {
 	testReconciler := &IPSecConnectionReconciler{
 		Client: fake.NewClientBuilder().
 			WithScheme(scheme).
-			WithObjects(&conn1, &conn2, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "localcluster"}}).
+			WithObjects(&conn1, &conn2, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "localcluster"}, Status: corev1.NodeStatus{NodeInfo: corev1.NodeSystemInfo{MachineID: "aaabbbcccdddeeefff"}}}).
 			Build(),
 		Scheme: scheme,
 		Env: Envs{
@@ -642,7 +625,7 @@ func TestMultipleIPSecConnections(t *testing.T) {
 	if node.Charon == nil {
 		t.Errorf("Expected Charon pod, got nil")
 	} else {
-		expectedName := "charon-pod-localcluster"
+		expectedName := "charon-pod-aaabbbcccdddeeefff"
 		if node.Charon.Meta.Name != expectedName {
 			t.Errorf("Expected Charon pod name %s, got %s", expectedName, node.Charon.Meta.Name)
 		}
@@ -652,7 +635,7 @@ func TestMultipleIPSecConnections(t *testing.T) {
 	if node.Proxy == nil {
 		t.Errorf("Expected Proxy pod, got nil")
 	} else {
-		expectedName := "proxy-pod-localcluster"
+		expectedName := "proxy-pod-aaabbbcccdddeeefff"
 		if node.Proxy.Meta.Name != expectedName {
 			t.Errorf("Expected Proxy pod name %s, got %s", expectedName, node.Proxy.Meta.Name)
 		}

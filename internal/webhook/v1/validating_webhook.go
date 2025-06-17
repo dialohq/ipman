@@ -65,10 +65,11 @@ func validateIPSecConnectionDeletion(req *admissionv1.AdmissionRequest, workers 
 
 	for _, p := range workers {
 		cn, exists := p.Annotations[ipmanv1.AnnotationChildName]
-		if !exists {
+		in, exists2 := p.Annotations[ipmanv1.AnnotationIpmanName]
+		if !exists || !exists2 {
 			continue
 		}
-		if _, ok := ipsecconnection.Spec.Children[cn]; ok {
+		if _, ok := ipsecconnection.Spec.Children[cn]; ok && in == ipsecconnection.Name {
 			fmt.Println("Annotation exists on pod: ", p.Name)
 			return false, fmt.Errorf("Worker pods use xfrm that belongs to this ipsecconnection: %v", types.NamespacedName{Name: p.Name, Namespace: p.Namespace})
 		}
@@ -219,11 +220,11 @@ func validateIPSecConnectionUpdate(new ipmanv1.IPSecConnection, old ipmanv1.IPSe
 			}
 		}
 
-		localIpsEq := reflect.DeepEqual(newChild.LocalIps, oldChild.LocalIps)
+		localIpsEq := reflect.DeepEqual(newChild.LocalIPs, oldChild.LocalIPs)
 		if !localIpsEq {
 			deletedLocalIps := []string{}
-			for _, ip := range oldChild.LocalIps {
-				if !slices.Contains(newChild.LocalIps, ip) {
+			for _, ip := range oldChild.LocalIPs {
+				if !slices.Contains(newChild.LocalIPs, ip) {
 					deletedLocalIps = append(deletedLocalIps, ip)
 				}
 			}
