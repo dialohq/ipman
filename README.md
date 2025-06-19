@@ -1,3 +1,4 @@
+[![Artifact Hub](https://img.shields.io/endpoint?url=https://artifacthub.io/badge/repository/ipman)](https://artifacthub.io/packages/search?repo=ipman)
 # IPMan - IPSec Connection Manager for Kubernetes
 ![logo-512x512](https://github.com/user-attachments/assets/8739b49c-f77d-4c76-8091-73f427442bfb)
 
