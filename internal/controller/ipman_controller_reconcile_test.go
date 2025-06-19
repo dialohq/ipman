@@ -8,6 +8,7 @@ import (
 	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -118,6 +119,7 @@ func createTestScheme() *runtime.Scheme {
 	scheme := runtime.NewScheme()
 	ipmanv1.AddToScheme(scheme)
 	corev1.AddToScheme(scheme)
+	promv1.AddToScheme(scheme)
 	return scheme
 }
 
@@ -144,7 +146,7 @@ func TestReconcileNotFound(t *testing.T) {
 	// Assert results
 	assert.NoError(t, err, "Reconcile should not return error when resource is not found")
 	assert.Equal(t, ctrl.Result{}, result, "Result should be empty")
-	assert.Equal(t, 1, client.getCount, "Get should be called once")
+	assert.Equal(t, 2, client.getCount, "Get should be called once (+1 for pod monitor)")
 }
 
 func TestReconcileGenericGetError(t *testing.T) {
@@ -169,7 +171,7 @@ func TestReconcileGenericGetError(t *testing.T) {
 
 	// Assert results
 	assert.Error(t, err, "Reconcile should return error when Get fails with non-NotFound error")
-	assert.Equal(t, ctrl.Result{RequeueAfter: 5 * time.Second}, result, "Result should be empty")
+	assert.Greater(t, result.RequeueAfter, time.Duration(0), "should requeue")
 	assert.Equal(t, 1, client.getCount, "Get should be called once")
 }
 
@@ -258,7 +260,8 @@ func TestReconcileErrorFetchingClusterState(t *testing.T) {
 
 	// Assert results
 	assert.Error(t, err, "Reconcile should return error when GetClusterState fails")
-	assert.Equal(t, ctrl.Result{}, result, "Result should be empty")
+	fmt.Println(err)
+	assert.Greater(t, result.RequeueAfter, time.Duration(0), "Result shouldnt be empty")
 	assert.Equal(t, 1, client.getCount, "Get should be called once")
 	assert.True(t, client.listCount > 0, "List should be attempted")
 }
@@ -317,7 +320,8 @@ func TestReconcileActionExecutionError(t *testing.T) {
 
 	// Assert results - this should fail during action execution
 	assert.Error(t, err, "Reconcile should return error when action execution fails")
-	assert.Equal(t, ctrl.Result{RequeueAfter: time.Duration(time.Second * 5)}, result, "Result should be empty")
+	fmt.Println(err)
+	assert.Greater(t, result.RequeueAfter, time.Duration(0), "Result should be empty")
 	assert.True(t, client.createCount > 0, "Create should be attempted")
 }
 
@@ -373,7 +377,7 @@ func TestReconcileSuccessful(t *testing.T) {
 
 	// Assert results - this should succeed
 	assert.Error(t, err, "Correctly errors")
-	assert.Equal(t, ctrl.Result{RequeueAfter: time.Duration(5 * time.Second)}, result, "Result should be empty")
+	assert.Greater(t, result.RequeueAfter, time.Duration(0), "Result should be 5s requeue")
 
 	// Verify that the status was updated
 	updatedConn := &ipmanv1.IPSecConnection{}

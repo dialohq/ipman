@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -128,6 +129,7 @@ var (
 	scheme = runtime.NewScheme()
 	_      = clientgoscheme.AddToScheme(scheme) // register core types
 	_      = ipmanv1.AddToScheme(scheme)
+	_      = promv1.AddToScheme(scheme)
 	r      = &IPSecConnectionReconciler{
 		Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects().Build(),
 		Scheme: scheme,

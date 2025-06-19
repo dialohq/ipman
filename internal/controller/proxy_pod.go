@@ -27,6 +27,13 @@ func (s ProxyPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 			Name:            ipmanv1.CharonAPIProxyContainerName,
 			ImagePullPolicy: corev1.PullPolicy(e.CaddyProxyPullPolicy),
 			Image:           e.CaddyImage,
+			Ports: []corev1.ContainerPort{
+				{
+					Name:          ipmanv1.CharonProxyPortName,
+					ContainerPort: ipmanv1.CharonProxyPort,
+					Protocol:      corev1.ProtocolTCP,
+				},
+			},
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					Name:      ipmanv1.CharonSocketHostVolumeName,

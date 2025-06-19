@@ -25,3 +25,6 @@ rules:
 - apiGroups: ["coordination.k8s.io"]
   resources: ["leases"]
   verbs: ["create", "delete", "list", "get", "watch", "update"]
+- apiGroups: ["monitoring.coreos.com"]
+  resources: ["podmonitors"]
+  verbs: ["create", "delete", "list", "get", "watch", "update"]

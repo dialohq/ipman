@@ -62,6 +62,12 @@ spec:
               value: {{ .Values.caddy.pullPolicy }}
             - name: POD_WAIT_TIMEOUT
               value: "{{ .Values.controller.podTimeoutSeconds }}"
+            - name: MONITORING_ENABLED
+              value: "{{ .Values.global.monitoring.enabled }}"
+            - name: MONITORING_SCRAPE_INTERVAL
+              value: "{{ .Values.global.monitoring.interval }}"
+            - name: MONITORING_RELEASE_NAME
+              value: "{{ .Values.global.monitoring.release}}"
 
           volumeMounts:
           - name: {{ .Values.webhook.volumes.name }}

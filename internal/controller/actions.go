@@ -11,7 +11,11 @@ import (
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
+	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/r3labs/diff/v3"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -19,6 +23,57 @@ import (
 // Action is an interface for reconciliation actions that can be performed
 type Action interface {
 	Do(context.Context, *IPSecConnectionReconciler) error
+}
+type DeleteMonitorAction struct{}
+
+func (a *DeleteMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
+	pm := promv1.PodMonitor{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ipmanv1.PodMonitorName,
+			Namespace: r.Env.NamespaceName,
+		},
+	}
+	err := r.Delete(ctx, &pm)
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil
+		} else {
+			return &RequestError{"Delete", "PodMonitor", err}
+		}
+	}
+
+	return nil
+}
+
+type CreateMonitorAction struct{}
+
+func (a *CreateMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
+	prtName := ipmanv1.CharonProxyPortName
+	prtNum := int32(ipmanv1.CharonProxyPort)
+
+	r.Create(ctx, &promv1.PodMonitor{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ipmanv1.PodMonitorName,
+			Namespace: r.Env.NamespaceName,
+			Labels: map[string]string{
+				"release": r.Env.MonitoringReleaseName,
+			},
+		},
+		Spec: promv1.PodMonitorSpec{
+			Selector: metav1.LabelSelector{MatchLabels: map[string]string{
+				ipmanv1.LabelPodType: ipmanv1.LabelValueProxyPod,
+			}},
+			PodMetricsEndpoints: []promv1.PodMetricsEndpoint{
+				{
+					Port:       &prtName,
+					PortNumber: &prtNum,
+					Path:       "/metrics",
+					Interval:   promv1.Duration(r.Env.MonitoringScrapeInterval),
+				},
+			},
+		},
+	})
+	return nil
 }
 
 // CreatePodAction represents an action to create a pod of a specific type

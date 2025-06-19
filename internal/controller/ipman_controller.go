@@ -13,6 +13,7 @@ import (
 	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -46,6 +47,9 @@ type Envs struct {
 	CaddyProxyPullPolicy     string
 	IsTest                   bool
 	WaitForPodTimeoutSeconds int64
+	IsMonitoringEnabled      bool
+	MonitoringScrapeInterval string
+	MonitoringReleaseName    string
 }
 
 // IPSecConnectionReconciler reconciles IPSecConnection resources
@@ -232,7 +236,6 @@ func (r *IPSecConnectionReconciler) XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodS
 	if err != nil {
 		fmt.Printf("Error unmarshaling XfrmPodSpec: %v\n", err)
 	}
-	fmt.Printf("%+v\n", spec)
 	nid, err := r.GetNodeID(p.Spec.NodeName)
 	// has to exist since there is a pod there
 	for err != nil {
@@ -330,9 +333,23 @@ func (r *IPSecConnectionReconciler) GetWorkersState(ctx context.Context) (*Worke
 
 // GetClusterState retrieves the current state of IPMan pods in the cluster
 func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*ClusterState, error) {
+	cs := &ClusterState{
+		Nodes:      []NodeState{},
+		PodMonitor: true,
+	}
 	nodes, err := r.GetClusterNodes(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	pm := &promv1.PodMonitor{}
+	err = r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: ipmanv1.PodMonitorName}, pm)
+	if err != nil {
+		if !apierrors.IsNotFound(err) {
+			return nil, &RequestError{"Get", "PodMonitor", err}
+		} else {
+			cs.PodMonitor = false
+		}
 	}
 
 	charons, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueCharonPod, CharonFromPod)
@@ -351,10 +368,6 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 	}
 
 	sortPods(xfrms)
-
-	cs := &ClusterState{
-		Nodes: []NodeState{},
-	}
 	for _, n := range nodes {
 		xfrmClone := make([]IpmanPod[XfrmPodSpec], len(xfrms))
 		copy(xfrmClone, xfrms)
@@ -738,7 +751,7 @@ func (r *IPSecConnectionReconciler) CreateDesiredState(ctx context.Context) (*Cl
 		return nil, fmt.Errorf("Error creating nodes: %w", err)
 	}
 
-	return &ClusterState{Nodes: ns}, nil
+	return &ClusterState{Nodes: ns, PodMonitor: r.Env.IsMonitoringEnabled}, nil
 }
 
 func IsNodeChanged(c diff.Change) bool {
@@ -1027,10 +1040,6 @@ func compareXfrmPods(a, b IpmanPod[XfrmPodSpec]) bool {
 func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 	logger := log.FromContext(context.Background())
 
-	cl, _ := diff.Diff(current, desired)
-	for _, c := range cl {
-		fmt.Printf("%+v\n", c)
-	}
 	compareXfrmPodsLists := func(desired, current []IpmanPod[XfrmPodSpec]) bool {
 		if len(desired) != len(current) {
 			return false
@@ -1142,6 +1151,14 @@ func deleteNode(ns *NodeState) []Action {
 // DiffStates compares desired and current cluster states and returns actions needed to reconcile them
 func (r *IPSecConnectionReconciler) DiffStates(desired *ClusterState, current *ClusterState, conns []ipmanv1.IPSecConnection) ([]Action, error) {
 	acts := []Action{}
+	if desired.PodMonitor == true && current.PodMonitor == false {
+		acts = append(acts, &CreateMonitorAction{})
+	}
+
+	if desired.PodMonitor == false && current.PodMonitor == true {
+		acts = append(acts, &DeleteMonitorAction{})
+	}
+
 	for _, ns := range desired.Nodes {
 		idx, found := findNode(ns.NodeName, current)
 		if !found {
@@ -1251,12 +1268,20 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		}
 	}
 	currentState, err := r.GetClusterState(ctx)
-	if errors.Is(err, &RequestError{}) {
+	if err != nil {
+		if errors.Is(err, &RequestError{}) {
+			return res(rq, time.Duration(time.Second*3)), err
+		}
+		logger.Error(err, "Error getting cluster state")
 		return res(rq, time.Duration(time.Second*3)), err
 	}
 
 	desiredState, err := r.CreateDesiredState(ctx)
-	if errors.Is(err, &RequestError{}) {
+	if err != nil {
+		if errors.Is(err, &RequestError{}) {
+			return res(rq, time.Duration(time.Second*3)), err
+		}
+		logger.Error(err, "Error creating desired cluster state")
 		return res(rq, time.Duration(time.Second*3)), err
 	}
 

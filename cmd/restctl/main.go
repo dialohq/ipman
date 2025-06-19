@@ -23,6 +23,7 @@ import (
 	"dialo.ai/ipman/pkg/swanparse"
 	"github.com/fsnotify/fsnotify"
 	"github.com/plan9better/goviciclient"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ip "github.com/vishvananda/netlink"
 )
 
@@ -290,7 +291,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 			secrets[c.IPSecConnection.Spec.Name] = secretInfo{secret: c.Secret, id: c.IPSecConnection.Spec.RemoteAddr}
 		}
 	}
-	vc, err := goviciclient.NewViciClient("", "")
+	vc, err := goviciclient.NewViciClient(nil)
 	if err != nil {
 		response.Errs = append(response.Errs, fmt.Sprintf("Failed to create vici client: %w", err))
 		w.WriteHeader(500)
@@ -318,7 +319,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	err = vc.LoadConns(toLoad)
 	notLoadedConns := []string{}
 	if err != nil {
-		conns, err := vc.ListConns("")
+		conns, err := vc.ListConns(nil)
 		if err != nil {
 			response.Errs = append(response.Errs, fmt.Sprintf("Some configs failed to load, Couldn't check which ones: %s", err.Error()))
 		} else {
@@ -454,7 +455,6 @@ func main() {
 	logger := slog.New(h)
 
 	SOCKETS_DIR := os.Getenv("HOST_SOCKETS_PATH")
-	fmt.Println(len(SOCKETS_DIR), []rune(SOCKETS_DIR))
 	if !strings.HasSuffix(SOCKETS_DIR, "/") {
 		SOCKETS_DIR = SOCKETS_DIR + "/"
 	}
@@ -487,7 +487,7 @@ func main() {
 
 	var vc *goviciclient.ViciClient
 	for {
-		vc, err = goviciclient.NewViciClient("", "")
+		vc, err = goviciclient.NewViciClient(nil)
 		if err != nil {
 			logger.Error("Failed to create a vici client on container start", "msg", err)
 			time.Sleep(time.Second)
@@ -506,6 +506,9 @@ func main() {
 
 	mux := http.NewServeMux()
 
+	strongswanCollector := NewStrongswanCollector()
+	strongswanCollector.init()
+	mux.Handle("/metrics", promhttp.Handler())
 	mux.HandleFunc("/p1ng", p0ng)
 	mux.HandleFunc("/reload", reloadConfig)
 	mux.HandleFunc("/xfrm", createXfrm)

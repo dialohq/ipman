@@ -7,8 +7,10 @@ import (
 	"testing"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
+	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -20,6 +22,7 @@ func TestAddIPSecConnection(t *testing.T) {
 	scheme := runtime.NewScheme()
 	_ = clientgoscheme.AddToScheme(scheme)
 	_ = ipmanv1.AddToScheme(scheme)
+	_ = promv1.AddToScheme(scheme)
 
 	// Define the existing IPSec connection
 	existingConnection := &ipmanv1.IPSecConnection{

@@ -104,7 +104,8 @@ type NodeInfo struct {
 // ClusterState represents the state of all nodes in the cluster
 // +k8s:deepcopy-gen=true
 type ClusterState struct {
-	Nodes []NodeState `json:"nodes" diff:"nodes"`
+	Nodes      []NodeState `json:"nodes" diff:"nodes"`
+	PodMonitor bool        `json:"pod_monitor" diff:"pod_monitor"`
 }
 
 type VxlanIP = string

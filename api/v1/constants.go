@@ -16,7 +16,7 @@ const (
 	// update the status of an ipman despite 'conflict' error before giving up
 	UpdateStatusMaxRetries = 5
 	// LabelPodType is the label key used to identify the type of pod
-	LabelPodType = "ipman.dialo.ai.type"
+	LabelPodType = "ipman.dialo.ai/type"
 	// LabelWorker is the label key used to identify worker pods
 	LabelWorker = "ipman.dialo.ai/worker"
 	// LabelValueCharonPod is the label value for Charon pods
@@ -59,6 +59,9 @@ const (
 	CharonConnVolumeMountPath       = "/etc/charon-conn"
 	CharonAPISocketVolumeName       = "restctl-socket"
 	CharonProxyPodSuffix            = "proxy"
+	CharonProxyPort                 = 80
+	CharonProxyPortName             = "api"
+	PodMonitorName                  = "ipman-ipsec-exporter"
 	CharonAPISocketVolumePath       = "/restctlsock/"
 	CharonAPIProxySocketHostPath    = "/var/run/restctl/" // ENV VAR
 	CharonAPIProxyContainerName     = "caddy-proxy"
