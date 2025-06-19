@@ -9,7 +9,7 @@ entries:
       name: ipman
       type: application
       urls:
-        - https://github.com/dialohq/ipman/releases/download/v0.1.9/ipman-0.1.9.tgz/ipman-0.1.9.tgz
+        - https://github.com/dialohq/ipman/releases/download/v0.1.9/ipman-0.1.9.tgz
       version: 0.1.9
     - apiVersion: v2
       appVersion: 1.16.0
