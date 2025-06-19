@@ -151,12 +151,27 @@ If you encounter issues with your IPSec connections:
    ```
 
 3. Verify pod annotations match the IPSecConnection configuration
+
+## Monitoring
+
+IPMan now supports monitoring via Prometheus. To enable monitoring:
+
+1. Set `global.monitoring.enabled` to `true` in your Helm values
+2. Set `global.monitoring.release` to the name you've given your Prometheus operator 
+   (e.g., if installed via `helm install kps prometheus-community/kube-prometheus-stack`, 
+   set it to "kps")
+
+See `helm/values.yaml` for more configuration options.
+
 ## Architecture
 ![image](https://github.com/user-attachments/assets/62ac06dd-8319-432c-9512-c3eebcb54b4d)
 
 ### Description
 IPMan ensures secure connectivity between remote sites and workload pods by injecting secondary interfaces tied to the local encryption domain's network. Inbound traffic arrives at the host’s network interface, is forwarded through a dedicated XFRM interface, and routed within an isolated VXLAN segment for enhanced security and segmentation.
 Charon, the IKE daemon from StrongSwan, operates on user-specified nodes, with instance counts driven by the IPsec configuration. Each child connection runs in a dedicated pod, equipped with its own XFRM interface and VXLAN segment. This design enables flexible workload deployment across the cluster, abstracting the underlying physical infrastructure for seamless scalability. Only ports 500 (IKE) and 4500 (NAT-traversal/IPsec) are exposed for secure communication. Charon and the restctl service, which manage the Charon socket and XFRM interface configuration, operate within the host network namespace, exposing only sockets mounted in the host filesystem. Control sockets, accessible via proxies, facilitate cluster-wide management without requiring additional open ports.
+
+## Acknowledgments
+Special thanks to [LarsTi](https://github.com/LarsTi/ipsec_exporter/) for his ipsec_exporter repository, which we've adapted for our use case.
 
 ## License
 
