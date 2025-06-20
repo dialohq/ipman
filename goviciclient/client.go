@@ -203,15 +203,30 @@ func (c *ViciClient) ListConnsNames() (*ConnectionsNames, error) {
 }
 
 func (c *ViciClient) LoadConns(conns map[string]IKEConfig) error {
-	var msg *vici.Message
-	var err error
+	msg := vici.NewMessage()
 
-	if msg, err = vici.MarshalMessage(conns); err != nil {
-		return err
+	for name, conn := range conns {
+		connMsg, err := vici.MarshalMessage(conn)
+		if err != nil {
+			return fmt.Errorf("failed to marshal connection %s: %w", name, err)
+		}
+		
+		err = msg.Set(name, connMsg)
+		if err != nil {
+			return fmt.Errorf("failed to set connection %s in message: %w", name, err)
+		}
 	}
 
-	_, err = c.commandRequest("load-conn", msg)
-	return err
+	resp, err := c.commandRequest("load-conn", msg)
+	if err != nil {
+		return fmt.Errorf("load-conn command failed: %w", err)
+	}
+	
+	if resp.Get("success") != "yes" {
+		return fmt.Errorf("failed to load connections: vici returned success = false")
+	}
+	
+	return nil
 }
 
 func (c *ViciClient) UnloadConns(conns string) error {

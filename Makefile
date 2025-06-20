@@ -1,88 +1,56 @@
-REGISTRY ?= plan9better
-PLATFORM ?= linux/amd64
+VERSION ?= 0.1.10
+DOCKERHUB_USER ?= plan9better
+LOCAL_REGISTRY ?= 192.168.10.201:5000
 
-GOOS ?= linux
-GOARCH ?= amd64
-PLATFORM ?= linux/amd64
+.PHONY: publish test all vxlandlord xfrminion restctl charon operator
 
+publish:
+	docker build -t $(DOCKERHUB_USER)/vxlandlord:$(VERSION) --platform linux/amd64 --file ./vxlandlord.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(DOCKERHUB_USER)/vxlandlord:$(VERSION) 
 
-BINARIES := operator restctl vxlandlord xfrminion
-IMG_operator        := ${REGISTRY}/controller:latest
-IMG_restctl         := ${REGISTRY}/restctl:latest
-IMG_vxlandlord      := ${REGISTRY}/vxlandlord:latest
-IMG_xfrminion       := ${REGISTRY}/xfrminion:latest
+	docker build -t $(DOCKERHUB_USER)/xfrminion:$(VERSION) --platform linux/amd64 --file ./xfrminion.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(DOCKERHUB_USER)/xfrminion:$(VERSION) 
 
-.PHONY: all build docker push deploy clean all-clean
+	docker build -t $(DOCKERHUB_USER)/restctl:$(VERSION) --platform linux/amd64 --file ./restctl.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(DOCKERHUB_USER)/restctl:$(VERSION)
 
-all: build docker push deploy
+	docker build -t $(DOCKERHUB_USER)/operator:$(VERSION) --platform linux/amd64 --file ./operator.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(DOCKERHUB_USER)/operator:$(VERSION) 
 
-all-clean: build docker push clean deploy
+	docker build -t $(DOCKERHUB_USER)/charon:$(VERSION) --platform linux/amd64 --file ./charon.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(DOCKERHUB_USER)/charon:$(VERSION) 
 
-build: $(BINARIES:%=build-%)
+test:
+	docker build -t $(LOCAL_REGISTRY)/vxlandlord:latest-dev --platform linux/amd64 --file ./vxlandlord.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/vxlandlord:latest-dev 
 
-build-%:
-	@echo "Building binary: $*"
-	GOOS=$(GOOS) GOARCH=$(GOARCH) CGO_ENABLED=0 go build -o bin/$* ./cmd/$*
+	docker build -t $(LOCAL_REGISTRY)/xfrminion:latest-dev --platform linux/amd64 --file ./xfrminion.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/xfrminion:latest-dev 
 
+	docker build -t $(LOCAL_REGISTRY)/restctl:latest-dev --platform linux/amd64 --file ./restctl.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/restctl:latest-dev
 
-docker: $(BINARIES:%=docker-%)
+	docker build -t $(LOCAL_REGISTRY)/operator:latest-dev --platform linux/amd64 --file ./operator.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/operator:latest-dev 
 
-docker-%:
-	@echo "Building docker image: $*"
-	docker build --platform ${PLATFORM} \
-		--build-arg TARGET=$* \
-		-t $(IMG_$*) .
+	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev --platform linux/amd64 --file ./charon.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/charon:latest-dev 
 
-push: $(BINARIES:%=push-%)
-
-push-%:
-	@echo "Pushing docker image: $*"
-	docker push $(IMG_$*)
-
-deploy:
-	cd config && kubectl apply                   \
-		-f namespace.yaml                         \
-		-f service_account.yaml                   \
-		-f cluster_role.yaml                      \
-		-f cluster_role_binding.yaml              \
-		-f webhook_service.yaml                   \
-		-f ipman.yaml                             \
-		-f ipman-controller-service.yaml          \
-		-f mutating_webhook.yaml                  \
-		-f validating_webhook.yaml                \
-		-f network_policy.yaml
-
-	kubectl create secret tls webhook-server-cert \
-		--cert certs/server.pem                   \
-		--key certs/server-key.pem                \
-		-n ims --dry-run=client -o yaml | kubectl apply -f -
-
-	kubectl apply -f config/controller_deployment.yaml
-
-clean:
-	-cd config && kubectl delete                   \
-		-f service_account.yaml                    \
-		-f cluster_role.yaml                       \
-		-f cluster_role_binding.yaml               \
-		-f webhook_service.yaml                    \
-		-f ipman.yaml                              \
-		-f mutating_webhook.yaml                   \
-		-f validating_webhook.yaml                 \
-		-f ipman-controller-service.yaml           \
-		-f namespace.yaml || true
 
 vxlandlord:
-	docker build -t plan9better/vxlandlord:0.1.9 --platform linux/amd64 --file ./vxlandlord.Dockerfile .
-	docker push plan9better/vxlandlord:0.1.9 
+	docker build -t $(LOCAL_REGISTRY)/vxlandlord:latest-dev --platform linux/arm64 --file ./vxlandlord.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/vxlandlord:latest-dev 
 xfrminion:
-	docker build -t plan9better/xfrminion:0.1.9 --platform linux/amd64 --file ./xfrminion.Dockerfile .
-	docker push plan9better/xfrminion:0.1.9 
+	docker build -t $(LOCAL_REGISTRY)/xfrminion:latest-dev --platform linux/arm64 --file ./xfrminion.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/xfrminion:latest-dev 
 restctl:
-	docker build -t plan9better/restctl:0.1.9 --platform linux/amd64 --file ./restctl.Dockerfile .
-	docker push plan9better/restctl:0.1.9
+	docker build -t $(LOCAL_REGISTRY)/restctl:latest-dev --platform linux/arm64 --file ./restctl.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/restctl:latest-dev
 operator:
-	docker build -t plan9better/operator:0.1.9 --platform linux/amd64 --file ./operator.Dockerfile .
-	docker push plan9better/operator:0.1.9 
+	docker build -t $(LOCAL_REGISTRY)/operator:latest-dev2 --platform linux/arm64 --file ./operator.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/operator:latest-dev2 
 charon:
-	docker build -t plan9better/charon:0.1.9 --platform linux/amd64 --file ./charon.Dockerfile .
-	docker push plan9better/charon:0.1.9 
+	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev --platform linux/arm64 --file ./charon.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/charon:latest-dev 
+
+all: vxlandlord xfrminion restctl operator charon

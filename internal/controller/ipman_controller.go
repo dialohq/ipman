@@ -1245,11 +1245,11 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 	if !apierrors.IsNotFound(err) {
 		if err != nil {
 			logger.Error(err, "Error fetching pod")
-			return ctrl.Result{RequeueAfter: time.Duration(5 * time.Second)}, err
+			return ctrl.Result{}, err
 		} else {
 			if pod.Status.PodIP == "" {
 				logger.Info("Pod doesn't have ip yet, requeuing...")
-				return ctrl.Result{RequeueAfter: time.Duration(1 * time.Second)}, nil
+				return ctrl.Result{}, nil
 			}
 		}
 	}
@@ -1263,37 +1263,36 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 
 	if err != nil {
 		if ctr == ipmanv1.UpdateStatusMaxRetries+1 {
-			dur := time.Duration(5 * time.Second)
-			return res(&dur), fmt.Errorf("Error updating status after %d tries: %w", ipmanv1.UpdateStatusMaxRetries, err)
+			return ctrl.Result{}, fmt.Errorf("Error updating status after %d tries: %w", ipmanv1.UpdateStatusMaxRetries, err)
 		}
 	}
 	currentState, err := r.GetClusterState(ctx)
 	if err != nil {
 		if errors.Is(err, &RequestError{}) {
-			return res(rq, time.Duration(time.Second*3)), err
+			return ctrl.Result{}, err
 		}
 		logger.Error(err, "Error getting cluster state")
-		return res(rq, time.Duration(time.Second*3)), err
+		return ctrl.Result{}, err
 	}
 
 	desiredState, err := r.CreateDesiredState(ctx)
 	if err != nil {
 		if errors.Is(err, &RequestError{}) {
-			return res(rq, time.Duration(time.Second*3)), err
+			return ctrl.Result{}, err
 		}
 		logger.Error(err, "Error creating desired cluster state")
-		return res(rq, time.Duration(time.Second*3)), err
+		return ctrl.Result{}, err
 	}
 
 	cl := &ipmanv1.IPSecConnectionList{}
 	err = r.List(ctx, cl)
 	if err != nil {
-		return res(rq), fmt.Errorf("Couldn't list ipmen: %w", err)
+		return ctrl.Result{}, fmt.Errorf("Couldn't list ipmen: %w", err)
 	}
 
 	actions, err := r.DiffStates(desiredState, currentState, cl.Items)
 	if err != nil {
-		return res(rq), fmt.Errorf("Error diffing states: %w", err)
+		return ctrl.Result{}, fmt.Errorf("Error diffing states: %w", err)
 	}
 	actionTypes := []string{}
 	for _, a := range actions {
@@ -1304,7 +1303,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		err = a.Do(ctx, r)
 		if err != nil {
 			logger.Info("Error executing action", "action", a, "msg", err)
-			return res(rq, time.Duration(5*time.Second)), err
+			return ctrl.Result{}, err
 		}
 	}
 

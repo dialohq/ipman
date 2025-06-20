@@ -137,7 +137,6 @@
             act
             delve
             go
-            # gopls
             gnumake
             tokei # loc count
             dockerfile-language-server-nodejs

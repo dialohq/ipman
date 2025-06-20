@@ -46,29 +46,36 @@ func getExtra(e map[string]string, k string, d string) string {
 	return d
 }
 
+func normalizeTime(time string) (int, error) {
+	if time[len(time)-1] == 'm' {
+		timeNum, err := strconv.ParseInt(time[:len(time)-1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return int(timeNum) * 60, nil
+	}
+	if time[len(time)-1] == 'h' {
+		timeNum, err := strconv.ParseInt(time[:len(time)-1], 10, 64)
+		if err != nil {
+			return 0, err
+		}
+		return int(timeNum) * 60 * 60, nil
+	}
+	time = strings.TrimRight(time, "s")
+	n, err := strconv.ParseInt(time, 10, 64)
+	return int(n), err
+}
+
 func translate(ipsec ipmanv1.IPSecConnectionSpec) (*goviciclient.IKEConfig, error) {
-	// parse from extra
-	rekey_time, err := strconv.ParseInt(getExtra(ipsec.Extra, "rekey_time", "14400"), 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing rekey_time: %w", err)
-	}
-	reauth_time, err := strconv.ParseInt(getExtra(ipsec.Extra, "reauth_time", "14400"), 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing reauth_time: %w", err)
-	}
-	proposals := getExtra(ipsec.Extra, "esp_proposals", "aes256-sha256-ecp256")
 	version, err := strconv.ParseInt(getExtra(ipsec.Extra, "version", "2"), 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing proposals: %w", err)
+		return nil, fmt.Errorf("Error parsing version: %w", err)
 	}
 
 	ike := goviciclient.IKEConfig{
 		LocalAddrs:  []string{ipsec.LocalAddr},
 		RemoteAddrs: []string{ipsec.RemoteAddr},
-		Proposals:   []string{proposals},
 		Version:     strconv.FormatInt(version, 10),
-		ReauthTime:  int(rekey_time),
-		RekeyTime:   int(reauth_time),
 		LocalAuths: &goviciclient.LocalAuthConfig{
 			ID:   ipsec.LocalId,
 			Auth: "psk",
@@ -80,6 +87,110 @@ func translate(ipsec ipmanv1.IPSecConnectionSpec) (*goviciclient.IKEConfig, erro
 		Children: map[string]goviciclient.ChildSAConfig{},
 	}
 
+	// Handle proposals - default or from Extra
+	if val, ok := ipsec.Extra["proposals"]; ok && val != "" {
+		ike.Proposals = []string{ipsec.Extra["proposals"]}
+	} else {
+		// Default proposals if not specified
+		ike.Proposals = []string{"aes256-sha256-ecp256"}
+	}
+
+	// Handle rekey_time and reauth_time
+	if val, ok := ipsec.Extra["rekey_time"]; ok {
+		rekeyTime, err := normalizeTime(val)
+		if err != nil {
+			return nil, fmt.Errorf("Error parsing rekey_time: %w", err)
+		}
+		ike.RekeyTime = rekeyTime
+	} else {
+		// Default rekey_time if not specified (4h = 14400s)
+		ike.RekeyTime = 14400
+	}
+
+	if val, ok := ipsec.Extra["reauth_time"]; ok {
+		reauthTime, err := normalizeTime(val)
+		if err != nil {
+			return nil, fmt.Errorf("Error parsing reauth_time: %w", err)
+		}
+		ike.ReauthTime = reauthTime
+	} else {
+		// Default reauth_time if not specified (4h = 14400s)
+		ike.ReauthTime = 14400
+	}
+
+	// Process connection-level options from Extra
+	if val, ok := ipsec.Extra["local_port"]; ok {
+		ike.LocalPort = val
+	}
+	if val, ok := ipsec.Extra["remote_port"]; ok {
+		ike.RemotePort = val
+	}
+	if val, ok := ipsec.Extra["pull"]; ok {
+		ike.Pull = val
+	}
+	if val, ok := ipsec.Extra["dscp"]; ok {
+		ike.Dscp = val
+	}
+	if val, ok := ipsec.Extra["encap"]; ok {
+		ike.Encap = val
+	}
+	if val, ok := ipsec.Extra["mobike"]; ok {
+		ike.Mobike = val
+	}
+	if val, ok := ipsec.Extra["dpd_delay"]; ok {
+		ike.DpdDelay = val
+	}
+	if val, ok := ipsec.Extra["dpd_timeout"]; ok {
+		ike.DpdTimeout = val
+	}
+	if val, ok := ipsec.Extra["fragmentation"]; ok {
+		ike.Fragmentation = val
+	}
+	if val, ok := ipsec.Extra["childless"]; ok {
+		ike.Childless = val
+	}
+	if val, ok := ipsec.Extra["send_certreq"]; ok {
+		ike.SendCertreq = val
+	}
+	if val, ok := ipsec.Extra["send_cert"]; ok {
+		ike.SendCert = val
+	}
+	if val, ok := ipsec.Extra["ppk_id"]; ok {
+		ike.PpkId = val
+	}
+	if val, ok := ipsec.Extra["ppk_required"]; ok {
+		ike.PpkRequired = val
+	}
+	if val, ok := ipsec.Extra["keyingtries"]; ok {
+		ike.Keyingtries = val
+	}
+	if val, ok := ipsec.Extra["unique"]; ok {
+		ike.Unique = val
+	}
+	if val, ok := ipsec.Extra["over_time"]; ok {
+		ike.OverTime = val
+	}
+	if val, ok := ipsec.Extra["rand_time"]; ok {
+		ike.RandTime = val
+	}
+	if val, ok := ipsec.Extra["mediation"]; ok {
+		ike.Mediation = val
+	}
+	if val, ok := ipsec.Extra["mediated_by"]; ok {
+		ike.MediatedBy = val
+	}
+	if val, ok := ipsec.Extra["mediation_peer"]; ok {
+		ike.MediationPeer = val
+	}
+	if val, ok := ipsec.Extra["close_action"]; ok {
+		ike.CloseAction = val
+	}
+
+	// Handle pools separately as it's an array
+	if poolsStr, ok := ipsec.Extra["pools"]; ok && poolsStr != "" {
+		ike.Pools = strings.Split(poolsStr, ",")
+	}
+
 	for k, v := range ipsec.Children {
 		child := goviciclient.ChildSAConfig{
 			LocalTS:        v.LocalIPs,
@@ -87,13 +198,65 @@ func translate(ipsec ipmanv1.IPSecConnectionSpec) (*goviciclient.IKEConfig, erro
 			InInterfaceID:  v.XfrmIfId,
 			OutInterfaceID: v.XfrmIfId,
 		}
-		val, ok := v.Extra["start_action"]
+
+		// Handle child mode - default to "tunnel" if not specified
+		mode, ok := v.Extra["mode"]
 		if ok {
+			child.Mode = mode
+		} else {
+			child.Mode = "tunnel"
+		}
+
+		// Process child options
+		if val, ok := v.Extra["start_action"]; ok {
 			child.StartAction = val
 		}
-		val, ok = v.Extra["esp_proposals"]
-		if ok {
+		if val, ok := v.Extra["esp_proposals"]; ok {
 			child.EspProposals = []string{val}
+		}
+		if val, ok := v.Extra["rekey_time"]; ok {
+			child.RekeyTime = val
+		}
+		if val, ok := v.Extra["rand_packets"]; ok {
+			child.RandPackets = val
+		}
+		if val, ok := v.Extra["updown"]; ok {
+			child.Updown = val
+		}
+		if val, ok := v.Extra["hostaccess"]; ok {
+			child.Hostaccess = val
+		}
+		if val, ok := v.Extra["policies"]; ok {
+			child.Policies = val
+		}
+		if val, ok := v.Extra["set_mark_in"]; ok {
+			child.SetMarkIn = val
+		}
+		if val, ok := v.Extra["set_mark_out"]; ok {
+			child.SetMarkOut = val
+		}
+		if val, ok := v.Extra["dpd_action"]; ok {
+			child.DpdAction = val
+		}
+		if val, ok := v.Extra["close_action"]; ok {
+			child.CloseAction = val
+		}
+
+		// Store any remaining extras that aren't explicitly handled
+		for key, value := range v.Extra {
+			switch key {
+			case "mode", "start_action", "esp_proposals", "rekey_time", "rand_packets",
+				"updown", "hostaccess", "policies", "set_mark_in", "set_mark_out",
+				"dpd_action", "close_action":
+				// Skip options that are already handled
+				continue
+			default:
+				// Add to Extra map for any other options
+				if child.Extra == nil {
+					child.Extra = make(map[string]string)
+				}
+				child.Extra[key] = value
+			}
 		}
 
 		ike.Children[k] = child

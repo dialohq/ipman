@@ -90,7 +90,6 @@ func createPodFromSpec[S IpmanPodSpec](p *IpmanPod[S], r *IPSecConnectionReconci
 // Do executes the pod creation action against the Kubernetes API
 func (a *CreatePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
 	pod := createPodFromSpec(a.Pod, r)
-	fmt.Println("Creating pod")
 	err := r.Create(ctx, &pod)
 	if err != nil {
 		fmt.Println("Pod creation error", err)

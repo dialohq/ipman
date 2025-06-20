@@ -171,7 +171,7 @@ func TestReconcileGenericGetError(t *testing.T) {
 
 	// Assert results
 	assert.Error(t, err, "Reconcile should return error when Get fails with non-NotFound error")
-	assert.Greater(t, result.RequeueAfter, time.Duration(0), "should requeue")
+	assert.Equal(t, result.RequeueAfter, time.Duration(0), "should requeue")
 	assert.Equal(t, 1, client.getCount, "Get should be called once")
 }
 
@@ -261,7 +261,7 @@ func TestReconcileErrorFetchingClusterState(t *testing.T) {
 	// Assert results
 	assert.Error(t, err, "Reconcile should return error when GetClusterState fails")
 	fmt.Println(err)
-	assert.Greater(t, result.RequeueAfter, time.Duration(0), "Result shouldnt be empty")
+	assert.Equal(t, result.RequeueAfter, time.Duration(0), "Result shouldnt be empty")
 	assert.Equal(t, 1, client.getCount, "Get should be called once")
 	assert.True(t, client.listCount > 0, "List should be attempted")
 }
@@ -321,7 +321,7 @@ func TestReconcileActionExecutionError(t *testing.T) {
 	// Assert results - this should fail during action execution
 	assert.Error(t, err, "Reconcile should return error when action execution fails")
 	fmt.Println(err)
-	assert.Greater(t, result.RequeueAfter, time.Duration(0), "Result should be empty")
+	assert.Equal(t, result.RequeueAfter, time.Duration(0), "Result should be empty")
 	assert.True(t, client.createCount > 0, "Create should be attempted")
 }
 
@@ -377,7 +377,7 @@ func TestReconcileSuccessful(t *testing.T) {
 
 	// Assert results - this should succeed
 	assert.Error(t, err, "Correctly errors")
-	assert.Greater(t, result.RequeueAfter, time.Duration(0), "Result should be 5s requeue")
+	assert.Equal(t, result.RequeueAfter, time.Duration(0), "Result should be 5s requeue")
 
 	// Verify that the status was updated
 	updatedConn := &ipmanv1.IPSecConnection{}

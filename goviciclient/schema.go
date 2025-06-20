@@ -33,18 +33,29 @@ type IKEConnection struct {
 	RekeyTime   int                `vici:"rekey_time" json:"rekey_time"`
 	LocalAuths  LocalAuth          `vici:"local" json:"local"`
 	RemoteAuths RemoteAuth         `vici:"remote" json:"remote"`
+	Extra       map[string]string  `json:"extra"`
 	Children    map[string]ChildSA `vici:"children" json:"children"`
 }
 
 // ==============config strict================
 type ChildSAConfig struct {
-	Mode           string   `vici:"mode" json:"mode"`
-	StartAction    string   `vici:"start_action" json:"start_action"`
-	EspProposals   []string `vici:"esp_proposals" json:"esp_proposals"`
-	LocalTS        []string `vici:"local_ts" json:"local_ts"`
-	InInterfaceID  int      `vici:"if_id_in" json:"if_id_in"`
-	OutInterfaceID int      `vici:"if_id_out" json:"if_id_out"`
-	RemoteTS       []string `vici:"remote_ts" json:"remote_ts"`
+	Mode           string            `vici:"mode" json:"mode"`
+	StartAction    string            `vici:"start_action,omitempty" json:"start_action,omitempty"`
+	EspProposals   []string          `vici:"esp_proposals,omitempty" json:"esp_proposals,omitempty"`
+	LocalTS        []string          `vici:"local_ts" json:"local_ts"`
+	RemoteTS       []string          `vici:"remote_ts" json:"remote_ts"`
+	RekeyTime      string            `vici:"rekey_time,omitempty" json:"rekey_time,omitempty"`
+	RandPackets    string            `vici:"rand_packets,omitempty" json:"rand_packets,omitempty"`
+	Updown         string            `vici:"updown,omitempty" json:"updown,omitempty"`
+	Hostaccess     string            `vici:"hostaccess,omitempty" json:"hostaccess,omitempty"`
+	Policies       string            `vici:"policies,omitempty" json:"policies,omitempty"`
+	SetMarkIn      string            `vici:"set_mark_in,omitempty" json:"set_mark_in,omitempty"`
+	SetMarkOut     string            `vici:"set_mark_out,omitempty" json:"set_mark_out,omitempty"`
+	DpdAction      string            `vici:"dpd_action,omitempty" json:"dpd_action,omitempty"`
+	CloseAction    string            `vici:"close_action,omitempty" json:"close_action,omitempty"`
+	InInterfaceID  int               `vici:"if_id_in" json:"if_id_in"`
+	OutInterfaceID int               `vici:"if_id_out" json:"if_id_out"`
+	Extra          map[string]string `json:"extra,omitempty"`
 }
 
 // IKE|EAP|XAUTH|NTLM
@@ -83,15 +94,40 @@ type RemoteAuthConfig struct {
 }
 
 type IKEConfig struct {
-	LocalAddrs  []string                 `vici:"local_addrs" json:"local_addrs"`
-	RemoteAddrs []string                 `vici:"remote_addrs" json:"remote_addrs"`
-	Proposals   []string                 `vici:"proposals" json:"proposals"`
-	Version     string                   `vici:"version" json:"version"`
-	ReauthTime  int                      `vici:"reauth_time" json:"reauth_time"`
-	RekeyTime   int                      `vici:"rekey_time" json:"rekey_time"`
-	LocalAuths  *LocalAuthConfig         `vici:"local" json:"local"`
-	RemoteAuths *RemoteAuthConfig        `vici:"remote" json:"remote"`
-	Children    map[string]ChildSAConfig `vici:"children" json:"children"`
+	LocalAddrs     []string                 `vici:"local_addrs" json:"local_addrs"`
+	RemoteAddrs    []string                 `vici:"remote_addrs" json:"remote_addrs"`
+	LocalPort      string                   `vici:"local_port,omitempty" json:"local_port,omitempty"`
+	RemotePort     string                   `vici:"remote_port,omitempty" json:"remote_port,omitempty"`
+	Proposals      []string                 `vici:"proposals" json:"proposals"`
+	Version        string                   `vici:"version" json:"version"`
+	Pull           string                   `vici:"pull,omitempty" json:"pull,omitempty"`
+	Dscp           string                   `vici:"dscp,omitempty" json:"dscp,omitempty"`
+	Encap          string                   `vici:"encap,omitempty" json:"encap,omitempty"`
+	Mobike         string                   `vici:"mobike,omitempty" json:"mobike,omitempty"`
+	DpdDelay       string                   `vici:"dpd_delay,omitempty" json:"dpd_delay,omitempty"`
+	DpdTimeout     string                   `vici:"dpd_timeout,omitempty" json:"dpd_timeout,omitempty"`
+	Fragmentation  string                   `vici:"fragmentation,omitempty" json:"fragmentation,omitempty"`
+	Childless      string                   `vici:"childless,omitempty" json:"childless,omitempty"`
+	SendCertreq    string                   `vici:"send_certreq,omitempty" json:"send_certreq,omitempty"`
+	SendCert       string                   `vici:"send_cert,omitempty" json:"send_cert,omitempty"`
+	PpkId          string                   `vici:"ppk_id,omitempty" json:"ppk_id,omitempty"`
+	PpkRequired    string                   `vici:"ppk_required,omitempty" json:"ppk_required,omitempty"`
+	Keyingtries    string                   `vici:"keyingtries,omitempty" json:"keyingtries,omitempty"`
+	Unique         string                   `vici:"unique,omitempty" json:"unique,omitempty"`
+	ReauthTime     int                      `vici:"reauth_time" json:"reauth_time"`
+	RekeyTime      int                      `vici:"rekey_time" json:"rekey_time"`
+	OverTime       string                   `vici:"over_time,omitempty" json:"over_time,omitempty"`
+	RandTime       string                   `vici:"rand_time,omitempty" json:"rand_time,omitempty"`
+	Pools          []string                 `vici:"pools,omitempty" json:"pools,omitempty"`
+	IfIdIn         string                   `vici:"if_id_in,omitempty" json:"if_id_in,omitempty"`
+	IfIdOut        string                   `vici:"if_id_out,omitempty" json:"if_id_out,omitempty"`
+	Mediation      string                   `vici:"mediation,omitempty" json:"mediation,omitempty"`
+	MediatedBy     string                   `vici:"mediated_by,omitempty" json:"mediated_by,omitempty"`
+	MediationPeer  string                   `vici:"mediation_peer,omitempty" json:"mediation_peer,omitempty"`
+	CloseAction    string                   `vici:"close_action,omitempty" json:"close_action,omitempty"`
+	LocalAuths     *LocalAuthConfig         `vici:"local" json:"local"`
+	RemoteAuths    *RemoteAuthConfig        `vici:"remote" json:"remote"`
+	Children       map[string]ChildSAConfig `vici:"children" json:"children"`
 }
 
 type ConnectionsMap map[string]IKEConnection

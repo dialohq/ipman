@@ -12,7 +12,7 @@ COPY pkg ./pkg
 COPY api ./api
 
 
-RUN --mount=type=cache,target=/build GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o xfrminion ./cmd/xfrminion
+RUN --mount=type=cache,target=/build GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o xfrminion ./cmd/xfrminion
 
 FROM ubuntu:latest
 
