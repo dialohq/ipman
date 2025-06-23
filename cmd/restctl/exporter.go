@@ -74,12 +74,12 @@ func NewStrongswanCollector() *StrongswanCollector {
 		childrenLoaded: prometheus.NewDesc(
 			ns+"children_loaded",
 			"children loaded into the daemon",
-			[]string{"child_name"}, nil,
+			[]string{"child_name", "conn_name"}, nil,
 		),
 		childrenLoadedCnt: prometheus.NewDesc(
 			ns+"number_of_children_loaded",
 			"total number of children loaded into the daemon",
-			[]string{"child_name"}, nil,
+			nil, nil,
 		),
 		ikeVersion: prometheus.NewDesc(
 			ns+"ike_version",
@@ -313,7 +313,7 @@ func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 					c.childrenLoaded,
 					prometheus.GaugeValue,
 					float64(1),
-					n,
+					n, k,
 				)
 			}
 		}
