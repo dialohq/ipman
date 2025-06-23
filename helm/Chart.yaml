@@ -3,6 +3,7 @@ appVersion: 1.16.0
 description: IPSec connection manager
 name: ipman
 type: application
+version: 0.1.11
 annotations:
   artifacthub.io/category: "networking"
   artifacthub.io/images: |
@@ -35,4 +36,3 @@ annotations:
   artifacthub.io/recommendations: |
     - https://artifacthub.io/packages/helm/cert-manager/cert-manager
     - https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack
-version: 0.1.11
