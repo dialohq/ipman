@@ -47,8 +47,8 @@ restctl:
 	docker build -t $(LOCAL_REGISTRY)/restctl:latest-dev --platform linux/arm64 --file ./restctl.Dockerfile .
 	docker push $(LOCAL_REGISTRY)/restctl:latest-dev
 operator:
-	docker build -t $(LOCAL_REGISTRY)/operator:latest-dev2 --platform linux/arm64 --file ./operator.Dockerfile .
-	docker push $(LOCAL_REGISTRY)/operator:latest-dev2 
+	docker build -t $(LOCAL_REGISTRY)/operator:latest-dev --platform linux/arm64 --file ./operator.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/operator:latest-dev 
 charon:
 	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev --platform linux/arm64 --file ./charon.Dockerfile .
 	docker push $(LOCAL_REGISTRY)/charon:latest-dev 

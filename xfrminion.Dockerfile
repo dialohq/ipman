@@ -2,6 +2,8 @@ FROM golang:1.24.1 AS builder
 
 WORKDIR /workspace
 
+ARG PLATFORM=arm64
+
 ENV GOCACHE=/build
 COPY go.mod go.sum ./
 COPY ./goviciclient ./goviciclient
@@ -12,7 +14,7 @@ COPY pkg ./pkg
 COPY api ./api
 
 
-RUN --mount=type=cache,target=/build GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -o xfrminion ./cmd/xfrminion
+RUN --mount=type=cache,target=/build GOOS=linux GOARCH=${PLATFORM} CGO_ENABLED=0 go build -o xfrminion ./cmd/xfrminion
 
 FROM ubuntu:latest
 
