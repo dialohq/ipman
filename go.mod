@@ -19,7 +19,6 @@ require (
 require github.com/alecthomas/participle/v2 v2.1.4
 
 require (
-	github.com/alecthomas/repr v0.4.0
 	github.com/plan9better/goviciclient v0.0.0-00010101000000-000000000000
 	github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring v0.83.0
 )

@@ -4,6 +4,8 @@ result
 kubeconfig
 helm/ipman-*.tgz
 .github/workflows/.secrets
+CLAUDE.md
+samples
 
 **/.claude/settings.local.json
 
