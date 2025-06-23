@@ -1,9 +1,51 @@
 apiVersion: v1
 entries:
   ipman:
+    - annotations:
+        artifacthub.io/category: networking
+        artifacthub.io/crds: |
+          - kind: IPSecConnection
+            version: v1
+            name: ipsecconnection
+            description: Defines the connection to a remote site
+        artifacthub.io/images: |
+          - name: xfrminion
+            image: plan9better/xfrminion:0.1.11
+            platforms:
+              - linux/amd64
+          - name: vxlandlord
+            image: plan9better/vxlandlord:0.1.11
+            platforms:
+              - linux/amd64
+          - name: operator
+            image: plan9better/operator:0.1.11
+            platforms:
+              - linux/amd64
+          - name: restctl
+            image: plan9better/restctl:0.1.11
+            platforms:
+              - linux/amd64
+          - name: charon
+            image: plan9better/charon:0.1.11
+            platforms:
+              - linux/amd64
+        artifacthub.io/license: MIT
+        artifacthub.io/recommendations: |
+          - https://artifacthub.io/packages/helm/cert-manager/cert-manager
+          - https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack
+      apiVersion: v2
+      appVersion: 1.16.0
+      created: "2025-06-23T11:21:38.540455+02:00"
+      description: IPSec connection manager
+      digest: 0adc532da3fe8c1ca81716d15e3f69e6ceb5b4d7417be399bb3c4d423a78dcf4
+      name: ipman
+      type: application
+      urls:
+        - https://github.com/dialohq/ipman/releases/download/v0.1.11/ipman-0.1.11.tgz
+      version: 0.1.11
     - apiVersion: v2
       appVersion: 1.16.0
-      created: "2025-06-20T16:46:31.892931+02:00"
+      created: "2025-06-23T11:21:38.537508+02:00"
       description: IPSec connection manager
       digest: 73b20226326c4a49906cb8327301c454caf8894e850ba901a47651cc1f7f37d3
       name: ipman
@@ -13,13 +55,13 @@ entries:
       version: 0.1.10
     - apiVersion: v2
       appVersion: 1.16.0
-      created: "2025-06-20T16:46:31.894681+02:00"
+      created: "2025-06-23T11:21:38.541046+02:00"
       description: IPSec connection manager
       digest: 1820d79477daa62a4f465fb817f0ac376970ef134bbb5fc526eefc9ba48940c6
       name: ipman
       type: application
       urls:
-        - https://github.com/dialohq/ipman/releases/download/v0.1.10/ipman-0.1.9.tgz
+        - https://github.com/dialohq/ipman/releases/download/v0.1.9/ipman-0.1.9.tgz
       version: 0.1.9
     - apiVersion: v2
       appVersion: 1.16.0
@@ -31,4 +73,4 @@ entries:
       urls:
         - https://github.com/dialohq/ipman/releases/download/v0.1.8/ipman-0.1.8.tgz
       version: 0.1.8
-generated: "2025-06-20T16:46:31.891878+02:00"
+generated: "2025-06-23T11:21:38.536453+02:00"
