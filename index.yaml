@@ -10,23 +10,23 @@ entries:
             description: Defines the connection to a remote site
         artifacthub.io/images: |
           - name: xfrminion
-            image: plan9better/xfrminion:0.1.11
+            image: plan9better/xfrminion:0.1.12
             platforms:
               - linux/amd64
           - name: vxlandlord
-            image: plan9better/vxlandlord:0.1.11
+            image: plan9better/vxlandlord:0.1.12
             platforms:
               - linux/amd64
           - name: operator
-            image: plan9better/operator:0.1.11
+            image: plan9better/operator:0.1.12
             platforms:
               - linux/amd64
           - name: restctl
-            image: plan9better/restctl:0.1.11
+            image: plan9better/restctl:0.1.12
             platforms:
               - linux/amd64
           - name: charon
-            image: plan9better/charon:0.1.11
+            image: plan9better/charon:0.1.12
             platforms:
               - linux/amd64
         artifacthub.io/license: MIT
@@ -35,7 +35,49 @@ entries:
           - https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack
       apiVersion: v2
       appVersion: 1.16.0
-      created: "2025-06-23T11:21:38.540455+02:00"
+      created: "2025-06-24T15:41:07.858216+02:00"
+      description: IPSec connection manager
+      digest: 62a9037c83d0d971f24a773250f845c436e223725fd645db38a08fb950436632
+      name: ipman
+      type: application
+      urls:
+        - https://github.com/dialohq/ipman/releases/download/v0.1.12/ipman-0.1.12.tgz
+      version: 0.1.12
+    - annotations:
+        artifacthub.io/category: networking
+        artifacthub.io/crds: |
+          - kind: IPSecConnection
+            version: v1
+            name: ipsecconnection
+            description: Defines the connection to a remote site
+        artifacthub.io/images: |
+          - name: xfrminion
+            image: plan9better/xfrminion:0.1.12
+            platforms:
+              - linux/amd64
+          - name: vxlandlord
+            image: plan9better/vxlandlord:0.1.12
+            platforms:
+              - linux/amd64
+          - name: operator
+            image: plan9better/operator:0.1.12
+            platforms:
+              - linux/amd64
+          - name: restctl
+            image: plan9better/restctl:0.1.12
+            platforms:
+              - linux/amd64
+          - name: charon
+            image: plan9better/charon:0.1.12
+            platforms:
+              - linux/amd64
+        artifacthub.io/license: MIT
+        artifacthub.io/recommendations: |
+          - https://artifacthub.io/packages/helm/cert-manager/cert-manager
+          - https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack
+      apiVersion: v2
+      appVersion: 1.16.0
+      created: "2025-06-24T15:41:07.85717+02:00"
       description: IPSec connection manager
       digest: 0adc532da3fe8c1ca81716d15e3f69e6ceb5b4d7417be399bb3c4d423a78dcf4
       name: ipman
@@ -45,7 +87,7 @@ entries:
       version: 0.1.11
     - apiVersion: v2
       appVersion: 1.16.0
-      created: "2025-06-23T11:21:38.537508+02:00"
+      created: "2025-06-24T15:41:07.854706+02:00"
       description: IPSec connection manager
       digest: 73b20226326c4a49906cb8327301c454caf8894e850ba901a47651cc1f7f37d3
       name: ipman
@@ -55,7 +97,7 @@ entries:
       version: 0.1.10
     - apiVersion: v2
       appVersion: 1.16.0
-      created: "2025-06-23T11:21:38.541046+02:00"
+      created: "2025-06-24T15:41:07.858667+02:00"
       description: IPSec connection manager
       digest: 1820d79477daa62a4f465fb817f0ac376970ef134bbb5fc526eefc9ba48940c6
       name: ipman
@@ -73,4 +115,4 @@ entries:
       urls:
         - https://github.com/dialohq/ipman/releases/download/v0.1.8/ipman-0.1.8.tgz
       version: 0.1.8
-generated: "2025-06-23T11:21:38.536453+02:00"
+generated: "2025-06-24T15:41:07.853752+02:00"
