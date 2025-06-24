@@ -243,6 +243,7 @@ func listConns() ([]goviciclient.ConnectionsMap, error) {
 		fmt.Println("Error creating govici client", err)
 		return nil, err
 	}
+	defer client.Close()
 	conns, err := client.ListConns(nil)
 	if err != nil {
 		fmt.Println("Error listing conns", err)

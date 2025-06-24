@@ -648,22 +648,23 @@ func main() {
 		}
 	}
 
-	var vc *goviciclient.ViciClient
-	for {
-		vc, err = goviciclient.NewViciClient(nil)
-		if err != nil {
-			logger.Error("Failed to create a vici client on container start", "msg", err)
-			time.Sleep(time.Second)
-			continue
-		} else {
-			logger.Info("Created go vici client")
-			break
-		}
-	}
 	go func() {
 		for {
+			var vc *goviciclient.ViciClient
+			for {
+				vc, err = goviciclient.NewViciClient(nil)
+				if err != nil {
+					logger.Error("Failed to create a vici client...", "msg", err)
+					continue
+				}
+				break
+			}
 			time.Sleep(5 * time.Second)
 			tryInit(vc, logger)
+			err = vc.Close()
+			if err != nil {
+				logger.Error("Failed to close a vici client", "msg", err)
+			}
 		}
 	}()
 
