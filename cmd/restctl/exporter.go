@@ -1,13 +1,12 @@
 package main
 
 import (
-	"fmt"
-	"log"
 	"strings"
 
 	"github.com/plan9better/goviciclient"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/strongswan/govici/vici"
+	"k8s.io/klog/v2"
 )
 
 type StrongswanCollector struct {
@@ -27,7 +26,6 @@ type StrongswanCollector struct {
 	ikeReauthSecs    *prometheus.Desc
 	ikeChildren      *prometheus.Desc
 
-	saState              *prometheus.Desc
 	saEncap              *prometheus.Desc
 	saEncKeysize         *prometheus.Desc
 	saIntegKeysize       *prometheus.Desc
@@ -84,123 +82,117 @@ func NewStrongswanCollector() *StrongswanCollector {
 		ikeVersion: prometheus.NewDesc(
 			ns+"ike_version",
 			"Version Number of this IKE",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeState: prometheus.NewDesc(
 			ns+"ike_state",
 			"Status of this IKE",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeInitiator: prometheus.NewDesc(
 			ns+"ike_initiator",
 			"Flag if the server is the initiator for this connection",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeNatRemote: prometheus.NewDesc(
 			ns+"ike_nat_remote",
 			"Flag if the remote server is behind nat",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeNatFake: prometheus.NewDesc(
 			ns+"ike_nat_fake",
 			"Flag if the NAT is faked (to float to 4500)",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeEncKeysize: prometheus.NewDesc(
 			ns+"ike_encryption_keysize",
 			"Keysize of the encryption algorithm",
-			[]string{"name", "uniqueid", "algorithm", "dh_group"}, nil,
+			[]string{"name", "state", "algorithm", "dh_group"}, nil,
 		),
 		ikeIntegKeysize: prometheus.NewDesc(
 			ns+"ike_integrity_keysize",
 			"Keysize of the integrity algorithm",
-			[]string{"name", "uniqueid", "algorithm", "dh_group"}, nil,
+			[]string{"name", "state", "algorithm", "dh_group"}, nil,
 		),
 		ikeEstablishSecs: prometheus.NewDesc(
 			ns+"ike_established_second",
 			"Seconds since the IKE was established",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeRekeySecs: prometheus.NewDesc(
 			ns+"ike_rekey_second",
 			"Second count until the IKE will be rekeyed",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeReauthSecs: prometheus.NewDesc(
 			ns+"ike_reauth_second",
 			"Second count until the IKE will be reauthed",
-			[]string{"name", "uniqueid"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		ikeChildren: prometheus.NewDesc(
 			ns+"ike_children",
 			"Count of children of this IKE",
-			[]string{"name", "uniqueid"}, nil,
-		),
-
-		saState: prometheus.NewDesc(
-			ns+"sa_state",
-			"Status of this child sa",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"name", "state"}, nil,
 		),
 		saEncap: prometheus.NewDesc(
 			ns+"sa_encap",
 			"Forced Encapsulation in UDP Packets",
-			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state"}, nil,
 		),
 		saEncKeysize: prometheus.NewDesc(
 			ns+"sa_encryption_keysize",
 			"Keysize of the encryption algorithm",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "algorithm", "dh_group"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "algorithm", "dh_group"}, nil,
 		),
 		saIntegKeysize: prometheus.NewDesc(
 			ns+"sa_integrity_keysize",
 			"Keysize of the integrity algorithm",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "algorithm", "dh_group"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "algorithm", "dh_group"}, nil,
 		),
 		saBytesIn: prometheus.NewDesc(
 			ns+"sa_bytes_inbound",
 			"Number of bytes coming to the local server",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "localTS", "remoteTS"}, nil,
 		),
 		saPacketsIn: prometheus.NewDesc(
 			ns+"sa_packets_inbound",
 			"Number of packets coming to the local server",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "localTS", "remoteTS"}, nil,
 		),
 		saLastInSecs: prometheus.NewDesc(
 			ns+"sa_last_inbound_seconds",
 			"Number of seconds since the last inbound packet was received",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "localTS", "remoteTS"}, nil,
 		),
 		saBytesOut: prometheus.NewDesc(
 			ns+"sa_bytes_outbound",
 			"Number of bytes going to the remote server",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "localTS", "remoteTS"}, nil,
 		),
 		saPacketsOut: prometheus.NewDesc(
 			ns+"sa_packets_outbound",
 			"Number of packets going to the remote server",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "localTS", "remoteTS"}, nil,
 		),
 		saLastOutSecs: prometheus.NewDesc(
 			ns+"sa_last_outbound_seconds",
 			"Number of seconds since the last outbound packet was sent",
-			[]string{"ike_name", "ike_id", "child_name", "child_id", "localTS", "remoteTS"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state", "localTS", "remoteTS"}, nil,
 		),
 		saEstablishSecs: prometheus.NewDesc(
 			ns+"sa_established_second",
 			"Seconds since the child SA was established",
-			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state"}, nil,
 		),
 		saRekeySecs: prometheus.NewDesc(
 			ns+"sa_rekey_second",
 			"Second count until the child SA will be rekeyed",
-			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state"}, nil,
 		),
 		saLifetimeSecs: prometheus.NewDesc(
 			ns+"sa_lifetime_second",
 			"Second count until the lifetime expires",
-			[]string{"ike_name", "ike_id", "child_name", "child_id"}, nil,
+			[]string{"ike_name", "ike_state", "child_name", "child_state"}, nil,
 		),
 	}
 }
@@ -208,7 +200,7 @@ func NewStrongswanCollector() *StrongswanCollector {
 func listSAs() ([]LoadedIKE, error) {
 	s, err := vici.NewSession()
 	if err != nil {
-		log.Printf("Error Connecting to vici: %s", err)
+		klog.V(5).Infof("Error Connecting to vici: %s", err)
 		return nil, err
 	}
 	defer s.Close()
@@ -216,6 +208,7 @@ func listSAs() ([]LoadedIKE, error) {
 	var retVar []LoadedIKE
 	msgs, err := s.StreamedCommandRequest("list-sas", "list-sa", nil)
 	if err != nil {
+		klog.V(5).Infof("Error listing sas", err)
 		return retVar, err
 	}
 	for _, m := range msgs.Messages() { // <- Directly iterate over msgs
@@ -240,13 +233,13 @@ func listSAs() ([]LoadedIKE, error) {
 func listConns() ([]goviciclient.ConnectionsMap, error) {
 	client, err := goviciclient.NewViciClient(nil)
 	if err != nil {
-		fmt.Println("Error creating govici client", err)
+		klog.V(5).Infof("error creating govici client", err)
 		return nil, err
 	}
 	defer client.Close()
 	conns, err := client.ListConns(nil)
 	if err != nil {
-		fmt.Println("Error listing conns", err)
+		klog.V(5).Infof("error listing conns", err)
 		return nil, err
 	}
 	return conns, nil
@@ -270,7 +263,6 @@ func (c *StrongswanCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.ikeReauthSecs
 	ch <- c.ikeChildren
 
-	ch <- c.saState
 	ch <- c.saEncap
 	ch <- c.saEncKeysize
 	ch <- c.saIntegKeysize
@@ -293,7 +285,7 @@ func (c *StrongswanCollector) Describe(ch chan<- *prometheus.Desc) {
 func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 	conns, err := listConns()
 	if err != nil {
-		fmt.Println("Error listing conns", err)
+		klog.V(5).Info("Error listing conns", err)
 		ch <- prometheus.MustNewConstMetric(
 			c.connectionsLoadedCnt,
 			prometheus.GaugeValue,
@@ -326,6 +318,7 @@ func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	sas, err := listSAs()
 	if err != nil {
+		klog.V(5).Info("Error listing sas: ", err)
 		ch <- prometheus.MustNewConstMetric(
 			c.ikeConnCnt,          //Description
 			prometheus.GaugeValue, //Type
@@ -339,9 +332,13 @@ func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 		float64(len(sas)),     //Value
 	)
 	for _, v := range sas {
-		c.collectIkeMetrics(v, ch)
+		if v.State != "DELETED" {
+			c.collectIkeMetrics(v, ch)
+		}
 		for _, child := range v.Children {
-			c.collectSaMetrics(v.Name, v.UniqueId, child, ch)
+			if child.State != "DELETED" {
+				c.collectSaMetrics(v.Name, v.State, child, ch)
+			}
 		}
 	}
 }
@@ -350,159 +347,148 @@ func (c *StrongswanCollector) collectIkeMetrics(d LoadedIKE, ch chan<- prometheu
 		c.ikeVersion,          //Description
 		prometheus.GaugeValue, //Type
 		float64(d.Version),    //Value
-		d.Name, d.UniqueId,    //Labels
+		d.Name, d.State,       //Labels
 	)
-
-	state := 0
-	if d.State == "ESTABLISHED" {
-		state = 1
-	}
-
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeState,            //Description
 		prometheus.GaugeValue, //Type
-		float64(state),        //Value
-		d.Name, d.UniqueId,    //Labels
+		float64(1),            //Value
+		d.Name, d.State,       //Labels
 	)
 
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeInitiator,                      //Description
 		prometheus.GaugeValue,               //Type
 		float64(viciBoolToInt(d.Initiator)), //Value
-		d.Name, d.UniqueId,                  //Labels
+		d.Name, d.State,                     //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeNatRemote,                      //Description
 		prometheus.GaugeValue,               //Type
 		float64(viciBoolToInt(d.NatRemote)), //Value
-		d.Name, d.UniqueId,                  //Labels
+		d.Name, d.State,                     //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeNatFake,                      //Description
 		prometheus.GaugeValue,             //Type
 		float64(viciBoolToInt(d.NatFake)), //Value
-		d.Name, d.UniqueId,                //Labels
+		d.Name, d.State,                   //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.ikeEncKeysize,                         //Description
-		prometheus.GaugeValue,                   //Type
-		float64(d.EncKey),                       //Value
-		d.Name, d.UniqueId, d.EncAlg, d.DHGroup, //Labels
+		c.ikeEncKeysize,                      //Description
+		prometheus.GaugeValue,                //Type
+		float64(d.EncKey),                    //Value
+		d.Name, d.State, d.EncAlg, d.DHGroup, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.ikeIntegKeysize,                         //Description
-		prometheus.GaugeValue,                     //Type
-		float64(d.IntegKey),                       //Value
-		d.Name, d.UniqueId, d.IntegAlg, d.DHGroup, //Labels
+		c.ikeIntegKeysize,                      //Description
+		prometheus.GaugeValue,                  //Type
+		float64(d.IntegKey),                    //Value
+		d.Name, d.State, d.IntegAlg, d.DHGroup, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeEstablishSecs,      //Description
 		prometheus.GaugeValue,   //Type
 		float64(d.EstablishSec), //Value
-		d.Name, d.UniqueId,      //Labels
+		d.Name, d.State,         //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeRekeySecs,        //Description
 		prometheus.GaugeValue, //Type
 		float64(d.RekeySec),   //Value
-		d.Name, d.UniqueId,    //Labels
+		d.Name, d.State,       //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeReauthSecs,       //Description
 		prometheus.GaugeValue, //Type
 		float64(d.ReauthSec),  //Value
-		d.Name, d.UniqueId,    //Labels
+		d.Name, d.State,       //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
 		c.ikeChildren,
-		prometheus.GaugeValue,    //Type
-		float64(len(d.Children)), //Value
-		d.Name, d.UniqueId,       //Labels
+		prometheus.GaugeValue,       //Type
+		float64(length(d.Children)), //Value
+		d.Name, d.State,             //Labels
 	)
 }
-func (c *StrongswanCollector) collectSaMetrics(name string, uniqueId string, d LoadedChild, ch chan<- prometheus.Metric) {
-	state := 0
-	if d.State == "ESTABLISHED" {
-		state = 1
-	}
+
+func length(children map[string]LoadedChild) int {
+	names := map[string]string{}
+	return len(names)
+}
+func (c *StrongswanCollector) collectSaMetrics(name string, ikeState string, d LoadedChild, ch chan<- prometheus.Metric) {
 	ch <- prometheus.MustNewConstMetric(
-		c.saState,                                                                                       //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(state),                                                                                  //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
+		c.saEncap,                       //Description
+		prometheus.GaugeValue,           //Type
+		float64(viciBoolToInt(d.Encap)), //Value
+		name, ikeState, d.Name, d.State, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saEncap,                          //Description
-		prometheus.GaugeValue,              //Type
-		float64(viciBoolToInt(d.Encap)),    //Value
-		name, uniqueId, d.Name, d.UniqueId, //Labels
+		c.saEncKeysize,                                       //Description
+		prometheus.GaugeValue,                                //Type
+		float64(d.EncKey),                                    //Value
+		name, ikeState, d.Name, d.State, d.EncAlg, d.DHGroup, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saEncKeysize,                                          //Description
-		prometheus.GaugeValue,                                   //Type
-		float64(d.EncKey),                                       //Value
-		name, uniqueId, d.Name, d.UniqueId, d.EncAlg, d.DHGroup, //Labels
+		c.saIntegKeysize,                                       //Description
+		prometheus.GaugeValue,                                  //Type
+		float64(d.IntegKey),                                    //Value
+		name, ikeState, d.Name, d.State, d.IntegAlg, d.DHGroup, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saIntegKeysize,                                          //Description
-		prometheus.GaugeValue,                                     //Type
-		float64(d.IntegKey),                                       //Value
-		name, uniqueId, d.Name, d.UniqueId, d.IntegAlg, d.DHGroup, //Labels
+		c.saBytesIn,                                                                                  //Description
+		prometheus.GaugeValue,                                                                        //Type
+		float64(d.BytesIn),                                                                           //Value
+		name, ikeState, d.Name, d.State, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saBytesIn,                                                                                     //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(d.BytesIn),                                                                              //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
+		c.saPacketsIn,                                                                                //Description
+		prometheus.GaugeValue,                                                                        //Type
+		float64(d.PacketsIn),                                                                         //Value
+		name, ikeState, d.Name, d.State, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saPacketsIn,                                                                                   //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(d.PacketsIn),                                                                            //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
+		c.saLastInSecs,                                                                               //Description
+		prometheus.GaugeValue,                                                                        //Type
+		float64(d.LastInSec),                                                                         //Value
+		name, ikeState, d.Name, d.State, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saLastInSecs,                                                                                  //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(d.LastInSec),                                                                            //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
+		c.saBytesOut,                                                                                 //Description
+		prometheus.GaugeValue,                                                                        //Type
+		float64(d.BytesOut),                                                                          //Value
+		name, ikeState, d.Name, d.State, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saBytesOut,                                                                                    //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(d.BytesOut),                                                                             //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
+		c.saPacketsOut,                                                                               //Description
+		prometheus.GaugeValue,                                                                        //Type
+		float64(d.PacketsOut),                                                                        //Value
+		name, ikeState, d.Name, d.State, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saPacketsOut,                                                                                  //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(d.PacketsOut),                                                                           //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
-	)
-	ch <- prometheus.MustNewConstMetric(
-		c.saLastOutSecs,                                                                                 //Description
-		prometheus.GaugeValue,                                                                           //Type
-		float64(d.LastOutSec),                                                                           //Value
-		name, uniqueId, d.Name, d.UniqueId, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
+		c.saLastOutSecs,                                                                              //Description
+		prometheus.GaugeValue,                                                                        //Type
+		float64(d.LastOutSec),                                                                        //Value
+		name, ikeState, d.Name, d.State, strings.Join(d.LocalTS, ";"), strings.Join(d.RemoteTS, ";"), //Labels
 	)
 
 	ch <- prometheus.MustNewConstMetric(
-		c.saEstablishSecs,                  //Description
-		prometheus.GaugeValue,              //Type
-		float64(d.EstablishSec),            //Value
-		name, uniqueId, d.Name, d.UniqueId, //Labels
+		c.saEstablishSecs,               //Description
+		prometheus.GaugeValue,           //Type
+		float64(d.EstablishSec),         //Value
+		name, ikeState, d.Name, d.State, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saRekeySecs,                      //Description
-		prometheus.GaugeValue,              //Type
-		float64(d.RekeySec),                //Value
-		name, uniqueId, d.Name, d.UniqueId, //Labels
+		c.saRekeySecs,                   //Description
+		prometheus.GaugeValue,           //Type
+		float64(d.RekeySec),             //Value
+		name, ikeState, d.Name, d.State, //Labels
 	)
 	ch <- prometheus.MustNewConstMetric(
-		c.saLifetimeSecs,                   //Description
-		prometheus.GaugeValue,              //Type
-		float64(d.LifetimeSec),             //Value
-		name, uniqueId, d.Name, d.UniqueId, //Labels
+		c.saLifetimeSecs,                //Description
+		prometheus.GaugeValue,           //Type
+		float64(d.LifetimeSec),          //Value
+		name, ikeState, d.Name, d.State, //Labels
 	)
 }
 func viciBoolToInt(v string) int {

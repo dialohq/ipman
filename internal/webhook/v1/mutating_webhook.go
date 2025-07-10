@@ -55,10 +55,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	logger := log.FromContext(ctx, "webhook", true, "PodName", in.Request.Name)
-	isDryRun := false
-	if in.Request.DryRun != nil && *in.Request.DryRun == true {
-		isDryRun = true
-	}
+	isDryRun := (in.Request.DryRun != nil && *in.Request.DryRun)
 
 	var pod corev1.Pod
 	json.Unmarshal(in.Request.Object.Raw, &pod)
@@ -70,7 +67,7 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 	if !(childOk && ipmanOk && poolOk) {
-		writeResponseDenied(w, in, "annotations missing")
+		writeResponseDenied(w, in, "some annotations missing")
 		return
 	}
 
@@ -256,9 +253,6 @@ func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
 			Path:  fmt.Sprintf("/spec/containers/%d/env", i),
 			Value: env,
 		})
-	}
-	if len(patch) == 0 {
-		return nil
 	}
 	return patch
 }

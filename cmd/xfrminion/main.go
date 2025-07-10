@@ -154,6 +154,12 @@ func addLocalRoute(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	if link == nil {
+		logger.Error("Error adding local route, couldn't find link of type vxlan")
+		writeError(w, fmt.Errorf("No link"), nil)
+		return
+	}
+
 	_, ipnet, err := net.ParseCIDR(lrr.VxlanIP)
 	if err != nil {
 		logger.Error("Error parsing vxlan ip as CIDR after bridge fdb append", "msg", err)
@@ -208,6 +214,11 @@ func deleteLocalRoute(w http.ResponseWriter, r *http.Request) {
 		if l.Type() == "vxlan" {
 			link = &links[i]
 		}
+	}
+	if link == nil {
+		logger.Error("Error deleting local route, couldn't find link of type vxlan")
+		writeError(w, fmt.Errorf("No link"), nil)
+		return
 	}
 
 	_, ipnet, err := net.ParseCIDR(lrr.VxlanIP)

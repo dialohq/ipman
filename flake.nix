@@ -24,23 +24,51 @@
         };
         n2cPkgs = nix2container.packages."${system}";
 
-        operator = pkgs.buildGoModule {
+        operator = pkgs.stdenv.mkDerivation {
           pname = "ipman-operator";
-          src = nix-filter {
-            root = ./.;
-            include = [
-              "internal"
-              "api"
-              "go.mod"
-              "go.sum"
-              "cmd/operator"
-              "pkg/"
-            ];
-          };
-          subPackages = ["cmd/operator"];
           version = "unversioned";
-          vendorHash = "sha256-hgwtBP0SVyGEEPI/B6qAm3MdSOYFV1N9wGnm1XdkrKk=";
+          src = ./.;
+          bulidInputs = [pkgs.go];
+          buildPhase = ''
+            GOCACHE=./.gocache CGO_ENABLED=0 GOOS=linux GOARCH=arm64 ${pkgs.go}/bin/go build -o manager ./cmd/operator
+          '';
+
+          installPhase = ''
+            mkdir -p $out
+            cp manager $out/
+          '';
         };
+
+        # operator = pkgs.buildGoModule {
+        #   pname = "ipman-operator";
+        #   src = nix-filter {
+        #     root = ./.;
+        #     include = [
+        #       "internal"
+        #       "api"
+        #       "go.mod"
+        #       "go.sum"
+        #       "cmd/operator"
+        #       "pkg/"
+        #       ".gocache"
+        #     ];
+        #   };
+        #   preBuild = ''
+        #     ls -lah ./.gocache
+        #     export GOCACHE="$(pwd)/.gocache"
+        #     echo "GOCACHE IS THIS: $GOCACHE"
+        #     pwd
+        #   '';
+        #   postBuild = ''
+        #     ls -lah ./.gocache
+        #     echo "GOCACHE IS THIS: $GOCACHE"
+        #     pwd
+        #   '';
+        #   doCheck = false;
+        #   subPackages = ["cmd/operator"];
+        #   version = "unversioned";
+        #   vendorHash = "sha256-0PZ0gfDntXNYlOheEOt9MolXFW5r2nXMuzadieMWmwM=";
+        # };
 
         operatorImage = n2cPkgs.nix2container.buildImage {
           name = "plan9better/operator";
@@ -151,6 +179,7 @@
             nixos-rebuild
             nixos-generators
             nilaway
+            mods
           ];
           shellHook = ''
             go mod tidy

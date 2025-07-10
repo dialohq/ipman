@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,8 +24,10 @@ import (
 	"dialo.ai/ipman/pkg/swanparse"
 	"github.com/fsnotify/fsnotify"
 	"github.com/plan9better/goviciclient"
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ip "github.com/vishvananda/netlink"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -279,7 +282,7 @@ func createXfrm(w http.ResponseWriter, r *http.Request) {
 
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Error("Couldn't read body of reqeust for vxlan, try again in 10s", "msg", err)
+		logger.Error("Couldn't read body of reqeust for xfrm, try again in 10s", "msg", err)
 		writeResponseWait(w, 10)
 		return
 	}
@@ -431,6 +434,15 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 		Errs:          []string{},
 	}
 
+	vc, err := goviciclient.NewViciClient(nil)
+	if err != nil {
+		response.Errs = append(response.Errs, fmt.Sprintf("Failed to create vici client: %w", err))
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	defer vc.Close()
+
 	data := &comms.ReloadData{}
 	err = json.Unmarshal(dataBytes, data)
 	if err != nil {
@@ -439,6 +451,49 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(response)
 		return
 	}
+	if data.Configs == nil {
+		w.WriteHeader(400)
+		response.Errs = append(response.Errs, "Config slice is nil")
+		json.NewEncoder(w).Encode(response)
+		return
+	}
+	wantedConfigNames := make([]string, len(data.Configs)*2)
+	for _, cfg := range data.Configs {
+		wantedConfigNames = append(wantedConfigNames, cfg.IPSecConnection.Name)
+		wantedConfigNames = append(wantedConfigNames, cfg.IPSecConnection.Spec.Name)
+	}
+	wantedChildrenNames := make([]string, len(data.Configs)*2)
+	for _, cfg := range data.Configs {
+		for childName := range cfg.IPSecConnection.Spec.Children {
+			wantedChildrenNames = append(wantedChildrenNames, childName)
+			wantedChildrenNames = append(wantedChildrenNames, childName)
+		}
+	}
+
+	loadedConns, err := vc.ListConns(nil)
+	for _, confMap := range loadedConns {
+		for name := range confMap {
+			for _, conf := range data.Configs {
+				if !slices.Contains(wantedConfigNames, name) {
+					fmt.Println("Unloading conn: ", name)
+					err = vc.UnloadConns(name)
+					if err != nil {
+						fmt.Println("Err unloading conn: ", err)
+					}
+				} else {
+					fmt.Println("------------")
+					fmt.Println("Not deleting config ", name)
+					fmt.Println("From list")
+					for _, confii := range data.Configs {
+						fmt.Println(confii.IPSecConnection.Name)
+					}
+					fmt.Sprintf("%s == %s %t", name, conf.IPSecConnection.Name, name == conf.IPSecConnection.Name)
+					fmt.Println("------------")
+				}
+			}
+		}
+	}
+
 	type secretInfo struct {
 		secret string
 		id     string
@@ -454,14 +509,6 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 			secrets[c.IPSecConnection.Spec.Name] = secretInfo{secret: c.Secret, id: c.IPSecConnection.Spec.RemoteAddr}
 		}
 	}
-	vc, err := goviciclient.NewViciClient(nil)
-	if err != nil {
-		response.Errs = append(response.Errs, fmt.Sprintf("Failed to create vici client: %w", err))
-		w.WriteHeader(500)
-		json.NewEncoder(w).Encode(response)
-		return
-	}
-	defer vc.Close()
 
 	notLoadedSecrets := []string{}
 	for k, secret := range secrets {
@@ -613,7 +660,18 @@ func fileExists(path string) (bool, error) {
 	return false, nil
 }
 
+type PromLogger struct {
+}
+
+func (l PromLogger) Println(v ...any) {
+	klog.V(5).Info(v...)
+}
+
 func main() {
+	klog.InitFlags(nil)
+	flag.Set("v", "5")
+	flag.Parse()
+	klog.Info("klogging")
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
@@ -655,6 +713,7 @@ func main() {
 				vc, err = goviciclient.NewViciClient(nil)
 				if err != nil {
 					logger.Error("Failed to create a vici client...", "msg", err)
+					time.Sleep(time.Second / 5)
 					continue
 				}
 				break
@@ -672,7 +731,10 @@ func main() {
 
 	strongswanCollector := NewStrongswanCollector()
 	strongswanCollector.init()
-	mux.Handle("/metrics", promhttp.Handler())
+	pl := PromLogger{}
+	mux.Handle("/metrics", promhttp.HandlerFor(prometheus.DefaultGatherer, promhttp.HandlerOpts{
+		ErrorLog: pl,
+	}))
 	mux.HandleFunc("/p1ng", p0ng)
 	mux.HandleFunc("/reload", reloadConfig)
 	mux.HandleFunc("/xfrm", createXfrm)

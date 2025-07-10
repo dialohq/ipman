@@ -3,28 +3,28 @@ appVersion: 1.16.0
 description: IPSec connection manager
 name: ipman
 type: application
-version: 0.1.12
+version: 0.1.13
 annotations:
   artifacthub.io/category: "networking"
   artifacthub.io/images: |
     - name: xfrminion
-      image: plan9better/xfrminion:0.1.12
+      image: plan9better/xfrminion:0.1.13
       platforms:
         - linux/amd64
     - name: vxlandlord
-      image: plan9better/vxlandlord:0.1.12
+      image: plan9better/vxlandlord:0.1.13
       platforms:
         - linux/amd64
     - name: operator
-      image: plan9better/operator:0.1.12
+      image: plan9better/operator:0.1.13
       platforms:
         - linux/amd64
     - name: restctl
-      image: plan9better/restctl:0.1.12
+      image: plan9better/restctl:0.1.13
       platforms:
         - linux/amd64
     - name: charon
-      image: plan9better/charon:0.1.12
+      image: plan9better/charon:0.1.13
       platforms:
         - linux/amd64
   artifacthub.io/crds: |

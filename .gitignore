@@ -6,6 +6,7 @@ helm/ipman-*.tgz
 .github/workflows/.secrets
 CLAUDE.md
 samples
+.gocache
 
 **/.claude/settings.local.json
 
