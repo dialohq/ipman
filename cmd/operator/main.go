@@ -21,7 +21,7 @@ import (
 )
 
 var (
-	logger = logf.Log.WithName("Setup")
+	log    = logf.Log.WithName("Setup")
 	scheme = runtime.NewScheme()
 )
 
@@ -38,21 +38,33 @@ func main() {
 		Scheme: scheme,
 	})
 	if err != nil {
-		logger.Error(err, "Creating manager failed")
+		log.Error(err, "Creating manager failed")
 		os.Exit(1)
 	}
 	podTimeout, err := strconv.ParseInt(os.Getenv("POD_WAIT_TIMEOUT"), 10, 64)
 	if err != nil {
-		logger.Error(err, "Couldn't parse wait for pod timeout")
+		log.Error(err, "Couldn't parse wait for pod timeout")
 		os.Exit(1)
+	}
+	ttlEnv := os.Getenv("XFRMINJECTOR_TTL_SECONDS")
+	var ttl *int32 = nil
+	if ttlEnv != "" {
+		inter, err := strconv.ParseInt(ttlEnv, 10, 32)
+		if err != nil {
+			log.Error(err, "couldn't parse ttl seconds")
+			os.Exit(1)
+		}
+		inter2 := int32(inter)
+		ttl = &inter2
 	}
 
 	// TODO: validate everything is not nil else error
-
 	e := controller.Envs{
 		NamespaceName:            os.Getenv("NAMESPACE_NAME"),
 		XfrminionImage:           os.Getenv("XFRMINION_IMAGE"),
 		VxlandlordImage:          os.Getenv("VXLANDLORD_IMAGE"),
+		XfrminjectorImage:        os.Getenv("XFRMINJECTOR_IMAGE"),
+		XfrminjectorTTL:          ttl,
 		RestctlImage:             os.Getenv("RESTCTL_IMAGE"),
 		RestctlPullPolicy:        os.Getenv("RESTCTL_PULL_POLICY"),
 		CaddyImage:               os.Getenv("CADDY_IMAGE"),
@@ -68,27 +80,27 @@ func main() {
 		IsTest:                   false,
 	}
 	if e.IsMonitoringEnabled {
-		logger.Info("Enabling monitoring", "release", e.MonitoringReleaseName)
+		log.Info("Enabling monitoring", "release", e.MonitoringReleaseName)
 	}
 
-	logger.Info("Creating controller")
+	log.Info("Creating controller")
 	if err = (&cont.IPSecConnectionReconciler{
 		Client: mgr.GetClient(),
 		Scheme: mgr.GetScheme(),
 		Env:    e,
 	}).SetupWithManager(mgr); err != nil {
-		logger.Error(err, "Creating controller failed")
+		log.Error(err, "Creating controller failed")
 		os.Exit(1)
 	}
 
-	logger.Info("New webhook")
+	log.Info("New webhook")
 	whServer := webhook.NewServer(webhook.Options{
 		Port:    ipmanv1.WebhookServerPort,
 		CertDir: ipmanv1.WebhookServerCertDir,
 	})
 
 	if err = mgr.Add(whServer); err != nil {
-		logger.Error(err, "Error registering wh server with the manager")
+		log.Error(err, "Error registering wh server with the manager")
 		os.Exit(1)
 	}
 
@@ -106,7 +118,7 @@ func main() {
 	whServer.Register("/validating", &vwh)
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
-		logger.Error(err, "problem running manager")
+		log.Error(err, "problem running manager")
 		os.Exit(1)
 	}
 }

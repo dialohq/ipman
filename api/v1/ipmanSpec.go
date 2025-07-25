@@ -6,15 +6,16 @@ import (
 )
 
 type IPSecConnectionSpec struct {
-	Name       string            `json:"name"`
-	RemoteAddr string            `json:"remoteAddr"`
-	LocalAddr  string            `json:"localAddr"`
-	LocalId    string            `json:"localId"`
-	RemoteId   string            `json:"remoteId"`
-	SecretRef  SecretRef         `json:"secretRef"`
-	Children   map[string]Child  `json:"children"`
-	NodeName   string            `json:"nodeName"`
-	Extra      map[string]string `json:"extra,omitempty"`
+	CharonAnnotations map[string]string `json:"charonExtraAnnotations"`
+	Name              string            `json:"name"`
+	RemoteAddr        string            `json:"remoteAddr"`
+	LocalAddr         string            `json:"localAddr"`
+	LocalId           string            `json:"localId"`
+	RemoteId          string            `json:"remoteId"`
+	SecretRef         SecretRef         `json:"secretRef"`
+	Children          map[string]Child  `json:"children"`
+	NodeName          string            `json:"nodeName"`
+	Extra             map[string]string `json:"extra,omitempty"`
 }
 
 type ConnData struct {

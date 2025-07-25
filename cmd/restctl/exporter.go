@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/plan9better/goviciclient"
@@ -26,22 +27,24 @@ type StrongswanCollector struct {
 	ikeReauthSecs    *prometheus.Desc
 	ikeChildren      *prometheus.Desc
 
-	saEncap              *prometheus.Desc
-	saEncKeysize         *prometheus.Desc
-	saIntegKeysize       *prometheus.Desc
-	saBytesIn            *prometheus.Desc
-	saPacketsIn          *prometheus.Desc
-	saLastInSecs         *prometheus.Desc
-	saBytesOut           *prometheus.Desc
-	saPacketsOut         *prometheus.Desc
-	saLastOutSecs        *prometheus.Desc
-	saEstablishSecs      *prometheus.Desc
-	saRekeySecs          *prometheus.Desc
-	saLifetimeSecs       *prometheus.Desc
-	connectionsLoadedCnt *prometheus.Desc
-	childrenLoadedCnt    *prometheus.Desc
-	connectionsLoaded    *prometheus.Desc
-	childrenLoaded       *prometheus.Desc
+	saDuplicateConnCount  *prometheus.Desc
+	saDuplicateChildCount *prometheus.Desc
+	saEncap               *prometheus.Desc
+	saEncKeysize          *prometheus.Desc
+	saIntegKeysize        *prometheus.Desc
+	saBytesIn             *prometheus.Desc
+	saPacketsIn           *prometheus.Desc
+	saLastInSecs          *prometheus.Desc
+	saBytesOut            *prometheus.Desc
+	saPacketsOut          *prometheus.Desc
+	saLastOutSecs         *prometheus.Desc
+	saEstablishSecs       *prometheus.Desc
+	saRekeySecs           *prometheus.Desc
+	saLifetimeSecs        *prometheus.Desc
+	connectionsLoadedCnt  *prometheus.Desc
+	childrenLoadedCnt     *prometheus.Desc
+	connectionsLoaded     *prometheus.Desc
+	childrenLoaded        *prometheus.Desc
 }
 
 func NewStrongswanCollector() *StrongswanCollector {
@@ -134,6 +137,16 @@ func NewStrongswanCollector() *StrongswanCollector {
 			"Count of children of this IKE",
 			[]string{"name", "state"}, nil,
 		),
+		saDuplicateConnCount: prometheus.NewDesc(
+			ns+"ike_dupes",
+			"Duplicate IKE's",
+			[]string{"conn_name"}, nil,
+		),
+		saDuplicateChildCount: prometheus.NewDesc(
+			ns+"sa_dupes",
+			"Duplicate SA's",
+			[]string{"conn_name", "child_name"}, nil,
+		),
 		saEncap: prometheus.NewDesc(
 			ns+"sa_encap",
 			"Forced Encapsulation in UDP Packets",
@@ -208,7 +221,7 @@ func listSAs() ([]LoadedIKE, error) {
 	var retVar []LoadedIKE
 	msgs, err := s.StreamedCommandRequest("list-sas", "list-sa", nil)
 	if err != nil {
-		klog.V(5).Infof("Error listing sas", err)
+		klog.V(5).Info("Error listing sas", err)
 		return retVar, err
 	}
 	for _, m := range msgs.Messages() { // <- Directly iterate over msgs
@@ -233,13 +246,11 @@ func listSAs() ([]LoadedIKE, error) {
 func listConns() ([]goviciclient.ConnectionsMap, error) {
 	client, err := goviciclient.NewViciClient(nil)
 	if err != nil {
-		klog.V(5).Infof("error creating govici client", err)
 		return nil, err
 	}
 	defer client.Close()
 	conns, err := client.ListConns(nil)
 	if err != nil {
-		klog.V(5).Infof("error listing conns", err)
 		return nil, err
 	}
 	return conns, nil
@@ -326,20 +337,83 @@ func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 		return
 	}
-	ch <- prometheus.MustNewConstMetric(
-		c.ikeConnCnt,          //Description
-		prometheus.GaugeValue, //Type
-		float64(len(sas)),     //Value
-	)
-	for _, v := range sas {
-		if v.State != "DELETED" {
-			c.collectIkeMetrics(v, ch)
+
+	type ikeInfo struct {
+		LoadedIKE LoadedIKE
+		Count     int
+	}
+	deduplicatedIkes := map[string]ikeInfo{}
+	for _, sa := range sas {
+		_, ok := deduplicatedIkes[sa.Name]
+		if !ok {
+			deduplicatedIkes[sa.Name] = ikeInfo{LoadedIKE: sa, Count: 0}
 		}
-		for _, child := range v.Children {
-			if child.State != "DELETED" {
-				c.collectSaMetrics(v.Name, v.State, child, ch)
+		val := deduplicatedIkes[sa.Name]
+		val.Count += 1
+		if val.LoadedIKE.UniqueId < sa.UniqueId {
+			val.LoadedIKE = sa
+		}
+		deduplicatedIkes[sa.Name] = val
+	}
+
+	type saInfo struct {
+		Count       int
+		Parent      string
+		ParentState string
+		LoadedChild LoadedChild
+	}
+	deduplicatedSas := map[string]saInfo{}
+	for _, ikeInfo := range deduplicatedIkes {
+		for _, childInfo := range ikeInfo.LoadedIKE.Children {
+			_, ok := deduplicatedSas[childInfo.Name]
+			if !ok {
+				deduplicatedSas[childInfo.Name] = saInfo{Count: 0, LoadedChild: childInfo, Parent: ikeInfo.LoadedIKE.Name, ParentState: ikeInfo.LoadedIKE.State}
 			}
+			val := deduplicatedSas[childInfo.Name]
+			val.Count += 1
+			loadedIdInt, _ := strconv.ParseInt(val.LoadedChild.UniqueId, 10, 64)
+			childInfoIdInt, _ := strconv.ParseInt(childInfo.UniqueId, 10, 64)
+
+			if loadedIdInt < childInfoIdInt {
+				val.LoadedChild = childInfo
+			}
+			deduplicatedSas[childInfo.Name] = val
 		}
+	}
+
+	var ikeDupes int = 0
+	for _, v := range deduplicatedIkes {
+		ikeDupes += v.Count - 1
+	}
+
+	var saDupes int = 0
+	for _, v := range deduplicatedSas {
+		saDupes += v.Count - 1
+	}
+
+	ch <- prometheus.MustNewConstMetric(
+		c.ikeConnCnt,                   //Description
+		prometheus.GaugeValue,          //Type
+		float64(len(deduplicatedIkes)), //Value
+	)
+
+	for _, v := range deduplicatedIkes {
+		ch <- prometheus.MustNewConstMetric(
+			c.saDuplicateConnCount,
+			prometheus.GaugeValue,
+			float64(v.Count-1),
+			v.LoadedIKE.Name,
+		)
+		c.collectIkeMetrics(v.LoadedIKE, ch)
+	}
+	for _, child := range deduplicatedSas {
+		ch <- prometheus.MustNewConstMetric(
+			c.saDuplicateChildCount,
+			prometheus.GaugeValue,
+			float64(child.Count-1),
+			child.Parent, child.LoadedChild.Name,
+		)
+		c.collectSaMetrics(child.Parent, child.ParentState, child.LoadedChild, ch)
 	}
 }
 func (c *StrongswanCollector) collectIkeMetrics(d LoadedIKE, ch chan<- prometheus.Metric) {
@@ -414,6 +488,9 @@ func (c *StrongswanCollector) collectIkeMetrics(d LoadedIKE, ch chan<- prometheu
 
 func length(children map[string]LoadedChild) int {
 	names := map[string]string{}
+	for _, child := range children {
+		names[child.Name] = "exists"
+	}
 	return len(names)
 }
 func (c *StrongswanCollector) collectSaMetrics(name string, ikeState string, d LoadedChild, ch chan<- prometheus.Metric) {

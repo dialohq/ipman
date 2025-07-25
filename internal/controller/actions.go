@@ -48,8 +48,8 @@ func (a *DeleteMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconcil
 type CreateMonitorAction struct{}
 
 func (a *CreateMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
-	prtName := ipmanv1.CharonProxyPortName
-	prtNum := int32(ipmanv1.CharonProxyPort)
+	prtName := ipmanv1.RestctlPortName
+	prtNum := int32(ipmanv1.RestctlPort)
 
 	r.Create(ctx, &promv1.PodMonitor{
 		ObjectMeta: metav1.ObjectMeta{
@@ -61,7 +61,7 @@ func (a *CreateMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconcil
 		},
 		Spec: promv1.PodMonitorSpec{
 			Selector: metav1.LabelSelector{MatchLabels: map[string]string{
-				ipmanv1.LabelPodType: ipmanv1.LabelValueProxyPod,
+				ipmanv1.LabelPodType: ipmanv1.LabelValueRestctlPod,
 			}},
 			PodMetricsEndpoints: []promv1.PodMetricsEndpoint{
 				{
@@ -92,8 +92,7 @@ func (a *CreatePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconcile
 	pod := createPodFromSpec(a.Pod, r)
 	err := r.Create(ctx, &pod)
 	if err != nil {
-		fmt.Println("Pod creation error", err)
-		return err
+		return fmt.Errorf("Pod creation error: %w", err)
 	}
 	finishedPod, err := r.waitForPodReady(types.NamespacedName{Namespace: a.Pod.Meta.Namespace, Name: a.Pod.Meta.Name})
 	if err != nil {
@@ -367,7 +366,7 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	tries := 0
 	for tries < 5 {
 		tries += 1
-		url := fmt.Sprintf("http://%s/p1ng", pod.Status.PodIP)
+		url := fmt.Sprintf("http://%s:61410/p1ng", pod.Status.PodIP)
 		resp, err := http.Get(url)
 		if err != nil {
 			fmt.Println("Waiting for proxy pod to respond to ping")
@@ -411,7 +410,7 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 			})
 		}
 	}
-	url := fmt.Sprintf("http://%s/reload", pod.Status.PodIP)
+	url := fmt.Sprintf("http://%s:61410/reload", pod.Status.PodIP)
 	data := comms.ReloadData{
 		Configs: d,
 	}
@@ -431,7 +430,7 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	if resp.StatusCode != 200 {
 		return rd
 	}
-	spec := ProxyPodSpec{}
+	spec := RestctlPodSpec{}
 	err = json.Unmarshal([]byte(pod.Annotations[ipmanv1.AnnotationSpec]), &spec)
 	if err != nil {
 		return fmt.Errorf("Couldn't unmarshal spec: %w", err)

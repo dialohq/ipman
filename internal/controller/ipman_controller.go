@@ -38,6 +38,9 @@ type Envs struct {
 	HostSocketsPath          string
 	XfrminionImage           string
 	XfrminionPullPolicy      string
+	XfrminjectorImage        string
+	XfrminjectorPullPolicy   string
+	XfrminjectorTTL          *int32
 	CharonDaemonImage        string
 	CharonDaemonPullPolicy   string
 	VxlandlordImage          string
@@ -182,8 +185,8 @@ func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
 }
 
 // ProxyFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
-func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
-	cs := ProxyPodSpec{}
+func ProxyFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
+	cs := RestctlPodSpec{}
 	err := json.Unmarshal([]byte(p.Annotations[ipmanv1.AnnotationSpec]), &cs)
 	if err != nil {
 		logger := log.FromContext(context.Background())
@@ -197,8 +200,8 @@ func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
 		}
 		logger.Error(e, "Couldn't unmarshal spec annotation of proxy pod")
 	}
-	return IpmanPod[ProxyPodSpec]{
-		Spec: ProxyPodSpec{
+	return IpmanPod[RestctlPodSpec]{
+		Spec: RestctlPodSpec{
 			HostPath: ExtractCharonVolumeSocketPath(p),
 			Configs:  cs.Configs,
 		},
@@ -357,7 +360,7 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 		return nil, err
 	}
 
-	proxies, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueProxyPod, ProxyFromPod)
+	proxies, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueRestctlPod, ProxyFromPod)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +410,7 @@ func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnect
 	}
 
 	chs := r.CreateCharons(cl, nodeNames)
-	prxs := r.CreateProxies(cl, nodeNames)
+	prxs := r.CreateRestctls(cl, nodeNames)
 	xfrms := r.CreateXfrms(cl)
 	sortPods(xfrms)
 
@@ -444,9 +447,11 @@ func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection, 
 	chs := []IpmanPod[CharonPodSpec]{}
 	for name, info := range nodes {
 		found := false
+		anns := map[string]string{}
 		for _, c := range cl {
 			if c.Spec.NodeName == name {
 				found = true
+				maps.Copy(anns, c.Spec.CharonAnnotations)
 				break
 			}
 		}
@@ -462,15 +467,16 @@ func (r *IPSecConnectionReconciler) CreateCharons(cl []ipmanv1.IPSecConnection, 
 			ch.Spec = CharonPodSpec{
 				HostPath: r.Env.HostSocketsPath,
 			}
+			ch.Annotations = anns
 			chs = append(chs, ch)
 		}
 	}
 	return chs
 }
 
-// CreateProxies creates Proxy pod specifications for the given IPSecConnections
-func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection, nodes map[string]NodeInfo) []IpmanPod[ProxyPodSpec] {
-	prxs := []IpmanPod[ProxyPodSpec]{}
+// CreateRestctls creates Proxy pod specifications for the given IPSecConnections
+func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection, nodes map[string]NodeInfo) []IpmanPod[RestctlPodSpec] {
+	rctls := []IpmanPod[RestctlPodSpec]{}
 	for name, info := range nodes {
 		configs := []ipmanv1.IPSecConnection{}
 		for _, c := range cl {
@@ -482,25 +488,25 @@ func (r *IPSecConnectionReconciler) CreateProxies(cl []ipmanv1.IPSecConnection, 
 			continue
 		}
 
-		prx := IpmanPod[ProxyPodSpec]{}
+		rctl := IpmanPod[RestctlPodSpec]{}
 		specs := []ipmanv1.IPSecConnectionSpec{}
 		for _, cfg := range configs {
 			specs = append(specs, cfg.Spec)
 		}
-		prx.Meta = PodMeta{
+		rctl.Meta = PodMeta{
 			NodeName:  name,
 			NodeID:    info.ID,
-			Name:      strings.Join([]string{ipmanv1.ProxyPodName, info.ID}, "-"),
+			Name:      strings.Join([]string{ipmanv1.RestctlPodName, info.ID}, "-"),
 			Namespace: r.Env.NamespaceName,
 			Image:     r.Env.CaddyImage,
 		}
-		prx.Spec = ProxyPodSpec{
+		rctl.Spec = RestctlPodSpec{
 			HostPath: r.Env.HostSocketsPath,
 			Configs:  specs,
 		}
-		prxs = append(prxs, prx)
+		rctls = append(rctls, rctl)
 	}
-	return prxs
+	return rctls
 }
 
 // returns time after which to requeue ipsecconnection
@@ -610,7 +616,7 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(ipsecconnection 
 		if node.GetLabels()["kubernetes.io/hostname"] == ipsecconnection.Spec.NodeName {
 			charonPod := &corev1.Pod{}
 			nsn := types.NamespacedName{
-				Name:      ipmanv1.ProxyPodName + "-" + node.Status.NodeInfo.MachineID,
+				Name:      ipmanv1.RestctlPodName + "-" + node.Status.NodeInfo.MachineID,
 				Namespace: r.Env.NamespaceName,
 			}
 			err = r.Get(ctx, nsn, charonPod)
@@ -800,12 +806,12 @@ func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *Ipman
 	return []Action{}
 }
 
-func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[ProxyPodSpec], current *IpmanPod[ProxyPodSpec], conns []ipmanv1.IPSecConnection) ([]Action, error) {
+func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[RestctlPodSpec], current *IpmanPod[RestctlPodSpec], conns []ipmanv1.IPSecConnection) ([]Action, error) {
 	if desired == nil && current == nil {
 		return []Action{}, nil
 	}
 	if desired == nil {
-		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}}, nil
+		return []Action{&DeletePodAction[RestctlPodSpec]{Pod: current}}, nil
 	}
 
 	connsPerNode := []ipmanv1.IPSecConnection{}
@@ -815,12 +821,12 @@ func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[ProxyPodSpec], c
 		}
 	}
 	if current == nil {
-		return []Action{&CreatePodAction[ProxyPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerNode}}, nil
+		return []Action{&CreatePodAction[RestctlPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerNode}}, nil
 	}
 
 	sameMeta := comparePods(desired, current)
 	if !sameMeta {
-		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}, &CreatePodAction[ProxyPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerNode}}, nil
+		return []Action{&DeletePodAction[RestctlPodSpec]{Pod: current}, &CreatePodAction[RestctlPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerNode}}, nil
 	}
 	slices.SortFunc(desired.Spec.Configs, func(a, b ipmanv1.IPSecConnectionSpec) int {
 		return strings.Compare(a.Name, b.Name)
@@ -1139,7 +1145,7 @@ func deleteNode(ns *NodeState) []Action {
 		acts = append(acts, &DeletePodAction[CharonPodSpec]{Pod: ns.Charon})
 	}
 	if ns.Proxy != nil {
-		acts = append(acts, &DeletePodAction[ProxyPodSpec]{Pod: ns.Proxy})
+		acts = append(acts, &DeletePodAction[RestctlPodSpec]{Pod: ns.Proxy})
 	}
 	for _, x := range ns.Xfrms {
 		acts = append(acts, &DeletePodAction[XfrmPodSpec]{Pod: &x})
@@ -1229,7 +1235,7 @@ func (r *IPSecConnectionReconciler) UpdateStatus(ctx context.Context) (*time.Dur
 		}
 		err = r.Status().Update(ctx, &ipsc)
 		if err != nil {
-			fmt.Println("Couldn't update status", err)
+			logger.Error(err, "Couldn't update status")
 			return rq, err
 		}
 	}
@@ -1249,7 +1255,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		} else {
 			if pod.Status.PodIP == "" {
 				logger.Info("Pod doesn't have ip yet, requeuing...")
-				return ctrl.Result{}, nil
+				return ctrl.Result{RequeueAfter: time.Second}, nil
 			}
 		}
 	}
@@ -1296,7 +1302,21 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 	}
 	actionTypes := []string{}
 	for _, a := range actions {
-		actionTypes = append(actionTypes, reflect.TypeOf(a).String())
+		str := reflect.TypeOf(a).String()
+		var brckts string = ""
+		idx := strings.Index(str, "[")
+
+		if idx != -1 {
+			str = str[0:idx]
+
+			brckts = str[idx:]
+			brcktsSplit := strings.Split(brckts, ".")
+			brckts = "[" + brcktsSplit[len(brcktsSplit)-1]
+		}
+		strSplit := strings.Split(str, ".")
+		str = strSplit[len(strSplit)-1]
+
+		actionTypes = append(actionTypes, str)
 	}
 	for _, a := range actions {
 		logger.Info("Doing action", "type", reflect.TypeOf(a))

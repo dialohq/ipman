@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"reflect"
 	"slices"
+	"strings"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/internal/controller"
@@ -110,6 +111,26 @@ func validateIPSecConnectionCreation(ipsecconnection ipmanv1.IPSecConnection, ot
 	for _, p := range pods {
 		if p.Annotations[ipmanv1.AnnotationIpmanName] == ipsecconnection.Spec.Name {
 			return false, fmt.Errorf("There are existing pods with this ipsecconnection annotation: %s@%s", p.ObjectMeta.Name, p.ObjectMeta.Namespace)
+		}
+	}
+	for _, child := range ipsecconnection.Spec.Children {
+		for _, ip := range child.LocalIPs {
+			if strings.Count(ip, "/") != 1 {
+				return false, fmt.Errorf("Local IP %s is invalid (make sure the subnet mask e.g. '/32' exists)", ip)
+			}
+		}
+		for _, ip := range child.RemoteIPs {
+			if strings.Count(ip, "/") != 1 {
+				return false, fmt.Errorf("Remote IP %s is invalid (make sure the subnet mask e.g. '/32' exists)", ip)
+			}
+		}
+
+		for poolName, pool := range child.IpPools {
+			for _, ip := range pool {
+				if strings.Count(ip, "/") != 1 {
+					return false, fmt.Errorf("IP in pool %s %s is invalid (make sure the subnet mask e.g. '/32' exists)", poolName, ip)
+				}
+			}
 		}
 	}
 	return validateIPSecConnectionUnique(ipsecconnection)

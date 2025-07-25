@@ -20,21 +20,28 @@ publish:
 	docker build -t $(DOCKERHUB_USER)/charon:$(VERSION) --platform linux/amd64 --file ./charon.Dockerfile --build-arg PLATFORM=amd64 .
 	docker push $(DOCKERHUB_USER)/charon:$(VERSION) 
 
+	docker build -t $(DOCKERHUB_USER)/xfrminjector:$(VERSION) --platform linux/amd64 --file ./xfrminjector.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(DOCKERHUB_USER)/xfrminjector:$(VERSION) 
+
 test:
-	docker build -t $(LOCAL_REGISTRY)/vxlandlord:latest-dev --platform linux/amd64 --file ./vxlandlord.Dockerfile --build-arg PLATFORM=amd64 .
-	docker push $(LOCAL_REGISTRY)/vxlandlord:latest-dev 
+	docker build -t $(LOCAL_REGISTRY)/vxlandlord:latest-dev-test --platform linux/amd64 --file ./vxlandlord.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/vxlandlord:latest-dev-test 
 
-	docker build -t $(LOCAL_REGISTRY)/xfrminion:latest-dev --platform linux/amd64 --file ./xfrminion.Dockerfile --build-arg PLATFORM=amd64 .
-	docker push $(LOCAL_REGISTRY)/xfrminion:latest-dev 
+	docker build -t $(LOCAL_REGISTRY)/xfrminion:latest-dev-test --platform linux/amd64 --file ./xfrminion.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/xfrminion:latest-dev-test 
 
-	docker build -t $(LOCAL_REGISTRY)/restctl:latest-dev --platform linux/amd64 --file ./restctl.Dockerfile --build-arg PLATFORM=amd64 .
-	docker push $(LOCAL_REGISTRY)/restctl:latest-dev
+	docker build -t $(LOCAL_REGISTRY)/restctl:latest-dev-test --platform linux/amd64 --file ./restctl.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/restctl:latest-dev-test
 
-	docker build -t $(LOCAL_REGISTRY)/operator:latest-dev --platform linux/amd64 --file ./operator.Dockerfile --build-arg PLATFORM=amd64 .
-	docker push $(LOCAL_REGISTRY)/operator:latest-dev 
+	docker build -t $(LOCAL_REGISTRY)/operator:latest-dev-test --platform linux/amd64 --file ./operator.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/operator:latest-dev-test 
 
-	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev --platform linux/amd64 --file ./charon.Dockerfile --build-arg PLATFORM=amd64 .
-	docker push $(LOCAL_REGISTRY)/charon:latest-dev 
+	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev-test --platform linux/amd64 --file ./charon.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/charon:latest-dev-test 
+
+	docker build -t $(LOCAL_REGISTRY)/xfrminjector:latest-dev-test --platform linux/amd64 --file ./xfrminjector.Dockerfile --build-arg PLATFORM=amd64 .
+	docker push $(LOCAL_REGISTRY)/xfrminjector:latest-dev-test 
+
 
 
 vxlandlord:
@@ -52,5 +59,8 @@ operator:
 charon:
 	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev --platform linux/arm64 --file ./charon.Dockerfile .
 	docker push $(LOCAL_REGISTRY)/charon:latest-dev 
+injector:
+	docker build -t $(LOCAL_REGISTRY)/xfrminjector:latest-dev-again2 --platform linux/arm64 --file ./xfrminjector.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/xfrminjector:latest-dev-again2 
 
-all: vxlandlord xfrminion restctl operator charon
+all: vxlandlord xfrminion restctl operator charon injector

@@ -21,12 +21,11 @@ const (
 	LabelWorker = "ipman.dialo.ai/worker"
 	// LabelValueCharonPod is the label value for Charon pods
 	LabelValueCharonPod = "charon"
-	// LabelValueRestctlPod is the label value for RestCtl pods
+	// LabelValueRestctlPod is the label value for Proxy pods
 	LabelValueRestctlPod = "restctl"
-	// LabelValueProxyPod is the label value for Proxy pods
-	LabelValueProxyPod = "proxy"
 	// LabelValueXfrmPod is the label value for Xfrm pods
 	LabelValueXfrmPod = "xfrm"
+	JobNamePrefix     = "ipman-injector"
 
 	orgDomain                  = "ipman.dialo.ai"
 	AnnotationChildName        = orgDomain + "/childName"
@@ -47,31 +46,23 @@ const (
 	InterfaceRequestContainerName = "iface-request"
 	CharonSocketHostVolumeName    = "charon-host-socket"
 
-	CharonPodName = "charon-pod" // keep this 2 part seperated with '-'
-	ProxyPodName  = "proxy-pod"
-	// CharonSocketVolumeName          = "charon-volume"
+	CharonPodName  = "charon-pod" // keep this 2 part seperated with '-'
+	RestctlPodName = "restctl-pod"
 
 	// CharonSocketVolumeMountPath specifies the path where the charon socket volume is mounted.
-	CharonSocketVolumeMountPath     = "/var/run/" // ENV VAR
-	CharonConfVolumeName            = "charon-conf"
-	CharonConfVolumeMountPath       = "/etc/swanctl/"
-	CharonConnVolumeName            = "charon-conn"
-	CharonConnVolumeMountPath       = "/etc/charon-conn"
-	CharonAPISocketVolumeName       = "restctl-socket"
-	CharonProxyPodSuffix            = "proxy"
-	CharonProxyPort                 = 80
-	CharonProxyPortName             = "api"
-	PodMonitorName                  = "ipman-ipsec-exporter"
-	CharonAPISocketVolumePath       = "/restctlsock/"
-	CharonAPIProxySocketHostPath    = "/var/run/restctl/" // ENV VAR
-	CharonAPIProxyContainerName     = "caddy-proxy"
-	CharonAPIProxyContainerImage    = "caddy"
-	CharonAPIProxyContainerImageTag = "2.10.0-alpine" // env var
-	CharonDaemonContainerName       = "charon-daemon"
-	CharonRestctlContainerName      = "restctl"
-	CharonCreateConfContainerName   = "create-conf"
-	CharonCreateConfImage           = "busybox"
-	CharonCreateConfImageTag        = "latest"
+	CharonSocketVolumeMountPath = "/var/run/" // ENV VAR
+	CharonConfVolumeName        = "charon-conf"
+	CharonConfVolumeMountPath   = "/etc/swanctl/"
+	CharonConnVolumeName        = "charon-conn"
+	CharonConnVolumeMountPath   = "/etc/charon-conn"
+	CharonAPISocketVolumeName   = "restctl-socket"
+	CharonProxyPodSuffix        = "proxy"
+	RestctlPort                 = 61410
+	RestctlPortName             = "api"
+	PodMonitorName              = "ipman-ipsec-exporter"
+	CharonAPIProxyContainerName = "restctl"
+	CharonDaemonContainerName   = "charon-daemon"
+	RestctlContainerName        = "restctl"
 
 	ReconcilerPendingIPsTimeoutSeconds = 35
 
@@ -83,5 +74,5 @@ const (
 
 	ProxySocketPathEnvVarName        = "PROXY_SOCKET_PATH"
 	WorkerContainerVxlanIPEnvVarName = "VXLAN_IP"
-	CharonPodServiceAnnotation       = "ipserviced"
+	ServiceLabel                     = "ipserviced"
 )

@@ -30,14 +30,14 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 							HostPath: "/test/path",
 						},
 					},
-					Proxy: &IpmanPod[ProxyPodSpec]{
+					Proxy: &IpmanPod[RestctlPodSpec]{
 						Meta: PodMeta{
-							Name:      "proxy-pod-test",
+							Name:      "restctl-pod-test",
 							Namespace: "ipman-system",
 							NodeName:  "test-node",
 							Image:     "test-image",
 						},
-						Spec: ProxyPodSpec{},
+						Spec: RestctlPodSpec{},
 					},
 					Xfrms: []IpmanPod[XfrmPodSpec]{
 						{
@@ -94,14 +94,14 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 							HostPath: "/test/path",
 						},
 					},
-					Proxy: &IpmanPod[ProxyPodSpec]{
+					Proxy: &IpmanPod[RestctlPodSpec]{
 						Meta: PodMeta{
-							Name:      "proxy-pod-test",
+							Name:      "restctl-pod-test",
 							Namespace: "ipman-system",
 							NodeName:  "test-node",
 							Image:     "test-image",
 						},
-						Spec: ProxyPodSpec{},
+						Spec: RestctlPodSpec{},
 					},
 					Xfrms: []IpmanPod[XfrmPodSpec]{
 						{
@@ -296,14 +296,14 @@ func TestDiffStatesWithDifferentNodeCounts(t *testing.T) {
 					HostPath: "/test/path",
 				},
 			},
-			Proxy: &IpmanPod[ProxyPodSpec]{
+			Proxy: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
-					Name:      "proxy-pod-" + nodeName,
+					Name:      "restctl-pod-" + nodeName,
 					Namespace: "ipman-system",
 					NodeName:  nodeName,
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
 			Xfrms: []IpmanPod[XfrmPodSpec]{},
 		}

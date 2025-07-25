@@ -42,35 +42,6 @@ func (s CharonPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 				},
 			},
 		},
-		{
-			Name:            ipmanv1.CharonRestctlContainerName,
-			Image:           e.RestctlImage,
-			ImagePullPolicy: corev1.PullPolicy(e.RestctlPullPolicy),
-			VolumeMounts: []corev1.VolumeMount{
-				{
-					Name:      ipmanv1.CharonSocketHostVolumeName,
-					MountPath: ipmanv1.CharonSocketVolumeMountPath,
-				},
-				{
-					Name:      ipmanv1.CharonConfVolumeName,
-					MountPath: ipmanv1.CharonConfVolumeMountPath,
-				},
-			},
-			Env: []corev1.EnvVar{
-				{
-					Name:  "HOST_SOCKETS_PATH",
-					Value: ipmanv1.CharonSocketVolumeMountPath,
-				},
-			},
-			SecurityContext: &corev1.SecurityContext{
-				Capabilities: &corev1.Capabilities{
-					Add: []corev1.Capability{
-						"NET_ADMIN",
-						"NET_RAW",
-					},
-				},
-			},
-		},
 	}
 	p.Spec.HostNetwork = true
 	p.Spec.HostPID = true

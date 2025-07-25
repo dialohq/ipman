@@ -9,7 +9,6 @@ import (
 	"net"
 
 	"net/http"
-	// "net/netip"
 	"os"
 	"os/exec"
 	"strconv"
@@ -414,6 +413,7 @@ func setupVxlan(w http.ResponseWriter, r *http.Request) {
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
 
+	logger.Info("Setting up vxlan")
 	defer r.Body.Close()
 	out, err := io.ReadAll(r.Body)
 	if err != nil {
@@ -493,7 +493,7 @@ func setupVxlan(w http.ResponseWriter, r *http.Request) {
 	u.Fatal(err, logger, "Couldn't parse CIDR of local ts", "local_ts", vxlanRequest.XfrmIP)
 
 	err = ip.LinkSetUp(xfrmIface)
-	u.Fatal(err, logger, "Error setting vxlan interface up")
+	u.Fatal(err, logger, "Error setting xfrm interface up")
 
 	routes, err := ip.RouteList(xfrmIface, ip.FAMILY_V4)
 	u.Fatal(err, logger, "Couldn't list routes for local ip", "dst", localIpNet)

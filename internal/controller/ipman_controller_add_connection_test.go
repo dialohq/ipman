@@ -126,10 +126,10 @@ func TestAddIPSecConnection(t *testing.T) {
 
 	proxyPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "proxy-pod-aaabbbcccdddeeefff",
+			Name:      "restctl-pod-aaabbbcccdddeeefff",
 			Namespace: "ipman-system",
 			Labels: map[string]string{
-				ipmanv1.LabelPodType: ipmanv1.LabelValueProxyPod,
+				ipmanv1.LabelPodType: ipmanv1.LabelValueRestctlPod,
 			},
 			Annotations: map[string]string{
 				ipmanv1.AnnotationSpec: `{"host_path":"/var/run/ipman"}`,
@@ -354,7 +354,7 @@ func TestAddIPSecConnection(t *testing.T) {
 			} else if a.Pod.Meta.NodeName == "node1" {
 				node1CharonActions++
 			}
-		case *CreatePodAction[ProxyPodSpec]:
+		case *CreatePodAction[RestctlPodSpec]:
 			if a.Pod.Meta.NodeName == "node2" {
 				node2ProxyActions++
 			} else if a.Pod.Meta.NodeName == "node1" {

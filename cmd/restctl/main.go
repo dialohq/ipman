@@ -20,13 +20,11 @@ import (
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
-	"dialo.ai/ipman/pkg/netconfig"
 	"dialo.ai/ipman/pkg/swanparse"
 	"github.com/fsnotify/fsnotify"
 	"github.com/plan9better/goviciclient"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	ip "github.com/vishvananda/netlink"
 	"k8s.io/klog/v2"
 )
 
@@ -90,6 +88,7 @@ func translate(ipsec ipmanv1.IPSecConnectionSpec) (*goviciclient.IKEConfig, erro
 		Children: map[string]goviciclient.ChildSAConfig{},
 	}
 
+	// TODO we need to do better than this 😞
 	// Handle proposals - default or from Extra
 	if val, ok := ipsec.Extra["proposals"]; ok && val != "" {
 		ike.Proposals = []string{ipsec.Extra["proposals"]}
@@ -272,144 +271,6 @@ func p0ng(w http.ResponseWriter, r *http.Request) {
 	w.Write([]byte("p0ng"))
 }
 
-var xfrmPodCiliumIPs map[string]string = map[string]string{}
-
-func createXfrm(w http.ResponseWriter, r *http.Request) {
-	handler := slog.NewJSONHandler(os.Stdout, nil)
-	logger := slog.New(handler)
-	w.Header().Set("Content-Type", "application/json")
-	logger.Info("Adding xfrm interface")
-
-	out, err := io.ReadAll(r.Body)
-	if err != nil {
-		logger.Error("Couldn't read body of reqeust for xfrm, try again in 10s", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	xrd := &comms.XfrmRequestData{}
-	err = json.Unmarshal(out, xrd)
-	if err != nil {
-		logger.Error("Couldn't unmarshal body of request for xfrm", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	ciliumIface, err := netconfig.FindDefaultInterface()
-	if err != nil {
-		logger.Error("Couldn't find default interface", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-	linkName := "xfrm" + strconv.FormatInt(int64(xrd.XfrmIfId), 10)
-	a := ip.LinkAttrs{
-		Name:        linkName,
-		NetNsID:     -1,
-		TxQLen:      -1,
-		ParentIndex: (*ciliumIface).Attrs().Index,
-	}
-	xfrmIface := ip.Xfrmi{
-		LinkAttrs: a,
-		Ifid:      uint32(xrd.XfrmIfId),
-	}
-	err = ip.LinkAdd(&xfrmIface)
-	if err != nil {
-		logger.Info("Error adding link, trying to delete conflicting one", "msg", err)
-		l, err := ip.LinkByName(linkName)
-		if err != nil {
-			logger.Error("No link with that name found", "msg", err, "link", l)
-		}
-
-		err = ip.LinkDel(l)
-		if err != nil {
-			logger.Error("Couldn't delete conflicting interface", "msg", err, "interface", xfrmIface)
-			writeResponseWait(w, 10)
-			return
-		}
-
-		err = ip.LinkAdd(&xfrmIface)
-		if err != nil {
-			logger.Error("Couldn't add interface after deletion", "msg", err, "interface", xfrmIface)
-			writeResponseWait(w, 10)
-			return
-		}
-	}
-
-	err = ip.LinkSetNsPid(&xfrmIface, int(xrd.PID))
-	if err != nil {
-		logger.Error("Couldn't move interface into netns by pid", "interface", xfrmIface, "pid", xrd.PID, "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	logger.Info("Added xfrm interface", "name", xfrmIface.Attrs().Name)
-	json.NewEncoder(w).Encode(comms.XfrmResponseData{Error: ""})
-	return
-}
-
-func writeResponseWait(w http.ResponseWriter, t int) {
-	// TODO: vxlan and xfrm structs share it but
-	// something custom would be better
-	vi := comms.VxlanInfo{
-		Wait: t,
-	}
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(vi)
-
-}
-
-func createVxlan(w http.ResponseWriter, r *http.Request) {
-	handler := slog.NewJSONHandler(os.Stdout, nil)
-	logger := slog.New(handler)
-
-	out, err := io.ReadAll(r.Body)
-	if err != nil {
-		logger.Error("Couldn't read body of reqeust for vxlan, try again in 10s", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	var vd comms.VxlanData
-	err = json.Unmarshal(out, &vd)
-	if err != nil {
-		logger.Error("Couldn't unmarshall body of request for vxlan interface, try again in 10s", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	// TODO: exponential backoff??
-	if _, ok := xfrmPodCiliumIPs[vd.ChildName]; !ok {
-		logger.Info("Xfrm pods cilium ip is still nil, waiting 10s")
-		writeResponseWait(w, 10)
-		return
-	}
-
-	cm, err := os.ReadFile(CHARON_CONN + vd.ChildName)
-	if err != nil {
-		logger.Error("Couldn't read file at "+CHARON_CONN+vd.ChildName+" try agian in 10s", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	conf := &ipmanv1.Child{}
-	err = json.Unmarshal(cm, conf)
-	if err != nil {
-		logger.Error("Couldn't unmarshal data from file intro child struct, try agian in 10s", "msg", err)
-		writeResponseWait(w, 10)
-		return
-	}
-
-	var vi comms.VxlanInfo
-	vi.IfId = conf.XfrmIfId
-	vi.XfrmIP = conf.XfrmIP
-	vi.XfrmUnderlyingIP = xfrmPodCiliumIPs[vd.ChildName]
-	vi.RemoteIps = conf.RemoteIPs
-	vi.Wait = 0
-	http.Get(fmt.Sprintf("http://%s:8080/add?ip=%s&vxlanIp=%s", xfrmPodCiliumIPs[vd.ChildName], vd.VxlanCiliumIP, vd.VxlanIfIp))
-	logger.Info("Added vxlan interface", "id", vi.IfId)
-	json.NewEncoder(w).Encode(vi)
-}
-
 func swanctl(args ...string) (string, error) {
 	cmd := exec.Command("swanctl", args...)
 	out, err := cmd.Output()
@@ -434,12 +295,20 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 		Errs:          []string{},
 	}
 
-	vc, err := goviciclient.NewViciClient(nil)
-	if err != nil {
-		response.Errs = append(response.Errs, fmt.Sprintf("Failed to create vici client: %w", err))
+	MAX_TRIES := 30
+	tries := 0
+	var vc *goviciclient.ViciClient
+	for tries < MAX_TRIES {
+		vc, err = goviciclient.NewViciClient(nil)
+		if err == nil && vc != nil {
+			break
+		}
+		time.Sleep(time.Second / 10)
+	}
+	if vc == nil {
+		response.Errs = append(response.Errs, fmt.Sprintf("Failed to create vici client: %s", err.Error()))
 		w.WriteHeader(500)
 		json.NewEncoder(w).Encode(response)
-		return
 	}
 	defer vc.Close()
 
@@ -473,7 +342,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	loadedConns, err := vc.ListConns(nil)
 	for _, confMap := range loadedConns {
 		for name := range confMap {
-			for _, conf := range data.Configs {
+			for range data.Configs {
 				if !slices.Contains(wantedConfigNames, name) {
 					fmt.Println("Unloading conn: ", name)
 					err = vc.UnloadConns(name)
@@ -481,14 +350,9 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 						fmt.Println("Err unloading conn: ", err)
 					}
 				} else {
-					fmt.Println("------------")
-					fmt.Println("Not deleting config ", name)
-					fmt.Println("From list")
 					for _, confii := range data.Configs {
 						fmt.Println(confii.IPSecConnection.Name)
 					}
-					fmt.Sprintf("%s == %s %t", name, conf.IPSecConnection.Name, name == conf.IPSecConnection.Name)
-					fmt.Println("------------")
 				}
 			}
 		}
@@ -503,7 +367,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	for _, c := range data.Configs {
 		cfg, err := translate(c.IPSecConnection.Spec)
 		if err != nil {
-			response.Errs = append(response.Errs, fmt.Sprintf("Failed to parse config '%s': %w", c.IPSecConnection.Spec.Name, err))
+			response.Errs = append(response.Errs, fmt.Sprintf("Failed to parse config '%s': %s", c.IPSecConnection.Spec.Name, err.Error()))
 		} else {
 			toLoad[c.IPSecConnection.Spec.Name] = *cfg
 			secrets[c.IPSecConnection.Spec.Name] = secretInfo{secret: c.Secret, id: c.IPSecConnection.Spec.RemoteAddr}
@@ -538,7 +402,7 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 				loaded = append(loaded, slices.Collect(maps.Keys(con))...)
 			}
 
-			for name := range maps.Keys(toLoad) {
+			for name := range toLoad {
 				if !slices.Contains(loaded, name) {
 					notLoadedConns = append(notLoadedConns, name)
 				}
@@ -554,7 +418,6 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	response.FailedConns = notLoadedConns
 	response.FailedSecrets = notLoadedSecrets
 	json.NewEncoder(w).Encode(response)
-	return
 }
 
 // RestartConnection attempts to restart a connection
@@ -606,7 +469,7 @@ func reconcileIPSec(conns, sas *swanparse.SwanAST) error {
 	return nil
 }
 
-func tryInit(vc *goviciclient.ViciClient, logger *slog.Logger) {
+func tryInit(logger *slog.Logger) {
 	// Get the list of connections
 	o, err := swanctl("--list-conns", "--raw")
 	if err != nil {
@@ -660,6 +523,7 @@ func fileExists(path string) (bool, error) {
 	return false, nil
 }
 
+// implements some logging interface prometheus wants
 type PromLogger struct {
 }
 
@@ -671,32 +535,31 @@ func main() {
 	klog.InitFlags(nil)
 	flag.Set("v", "5")
 	flag.Parse()
-	klog.Info("klogging")
+
 	h := slog.NewJSONHandler(os.Stdout, nil)
-	logger := slog.New(h)
+	log := slog.New(h)
 
 	SOCKETS_DIR := os.Getenv("HOST_SOCKETS_PATH")
 	if !strings.HasSuffix(SOCKETS_DIR, "/") {
 		SOCKETS_DIR = SOCKETS_DIR + "/"
 	}
 	ViciSocketPath := SOCKETS_DIR + "charon.vici"
-	RestctlSocketPath := SOCKETS_DIR + "restctl.sock"
 
 	ok, err := fileExists(ViciSocketPath)
 	if err != nil {
-		logger.Error("Error while checking for socket existence.")
+		log.Error("Error while checking for socket existence.")
 		os.Exit(1)
 	}
 
 	if !ok {
 		fsw, err := fsnotify.NewWatcher()
 		if err != nil {
-			logger.Error("Error creating fs watcher")
+			log.Error("Error creating fs watcher")
 			os.Exit(1)
 		}
 		err = fsw.Add(SOCKETS_DIR)
 		if err != nil {
-			logger.Error("Couldn't add a path to watch", "msg", err, "path", ViciSocketPath)
+			log.Error("Couldn't add a path to watch", "msg", err, "path", ViciSocketPath)
 		}
 		for {
 			e := <-fsw.Events
@@ -712,17 +575,17 @@ func main() {
 			for {
 				vc, err = goviciclient.NewViciClient(nil)
 				if err != nil {
-					logger.Error("Failed to create a vici client...", "msg", err)
-					time.Sleep(time.Second / 5)
+					log.Error("Failed to create a vici client...", "msg", err)
+					time.Sleep(time.Second / 3)
 					continue
 				}
 				break
 			}
 			time.Sleep(5 * time.Second)
-			tryInit(vc, logger)
+			tryInit(log)
 			err = vc.Close()
 			if err != nil {
-				logger.Error("Failed to close a vici client", "msg", err)
+				log.Error("Failed to close a vici client", "msg", err)
 			}
 		}
 	}()
@@ -737,28 +600,14 @@ func main() {
 	}))
 	mux.HandleFunc("/p1ng", p0ng)
 	mux.HandleFunc("/reload", reloadConfig)
-	mux.HandleFunc("/xfrm", createXfrm)
-	mux.HandleFunc("/vxlan", createVxlan)
 
 	server := http.Server{
 		Handler: mux,
 	}
 
-	ok, err = fileExists(RestctlSocketPath)
+	listener, err := net.Listen("tcp", ":61410")
 	if err != nil {
-		logger.Error("Error while checking for restctl socket existence.")
-		os.Exit(1)
-	}
-	if ok {
-		err = os.Remove(RestctlSocketPath)
-		if err != nil {
-			fmt.Println("Couldn't remove already existing restctl socket: %w", err)
-		}
-	}
-
-	listener, err := net.Listen("unix", RestctlSocketPath)
-	if err != nil {
-		logger.Error("Error listening on socket", "msg", err, "socket-path", RestctlSocketPath)
+		log.Error("Error listening on port 61410", "msg", err)
 		os.Exit(1)
 	}
 
@@ -766,12 +615,11 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-c
-		os.Remove(RestctlSocketPath)
 		os.Exit(0)
 	}()
 
-	logger.Info("Listening on socket", "socket", RestctlSocketPath)
+	log.Info("Listening on socket", "port", 61410)
 	if err := server.Serve(listener); err != nil {
-		logger.Error("Couldn't start server on listener", "msg", err)
+		log.Error("Couldn't start server on listener", "msg", err)
 	}
 }

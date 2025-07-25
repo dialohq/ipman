@@ -24,6 +24,7 @@ require (
 )
 
 require (
+	github.com/alecthomas/repr v0.5.1 // indirect
 	golang.org/x/tools v0.33.0 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
 )

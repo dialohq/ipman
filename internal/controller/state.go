@@ -2,6 +2,7 @@ package controller
 
 import (
 	"encoding/json"
+	"maps"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -16,23 +17,25 @@ type IpmanPodSpec interface {
 	ApplySpec(*corev1.Pod, Envs)
 	CompleteSetup(*IPSecConnectionReconciler, *corev1.Pod, string) error
 	CompleteDeletion(*IPSecConnectionReconciler, *corev1.Pod, string) error
-	CharonPodSpec | ProxyPodSpec | XfrmPodSpec
+	CharonPodSpec | RestctlPodSpec | XfrmPodSpec
 }
 
 // IpmanPod is a generic container for IPMan pod resources with their specifications
 type IpmanPod[Spec IpmanPodSpec] struct {
-	Meta PodMeta `json:"meta" diff:"meta"`
-	Spec Spec    `json:"spec" diff:"spec"`
+	Meta        PodMeta           `json:"meta" diff:"meta"`
+	Spec        Spec              `json:"spec" diff:"spec"`
+	Annotations map[string]string `json:"annotations" diff:"annotations"`
 }
 
 // CreateK8sPodMeta creates a Kubernetes Pod object with metadata from the IpmanPod
 func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 	var typeLabel string
+
 	switch any(p.Spec).(type) {
 	case CharonPodSpec:
 		typeLabel = ipmanv1.LabelValueCharonPod
-	case ProxyPodSpec:
-		typeLabel = ipmanv1.LabelValueProxyPod
+	case RestctlPodSpec:
+		typeLabel = ipmanv1.LabelValueRestctlPod
 	case XfrmPodSpec:
 		typeLabel = ipmanv1.LabelValueXfrmPod
 	default:
@@ -48,11 +51,13 @@ func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 			},
 		},
 	}
+
 	an, _ := json.Marshal(p.Spec)
 	pod.Spec = corev1.PodSpec{}
 	pod.Annotations = map[string]string{
 		ipmanv1.AnnotationSpec: string(an),
 	}
+	maps.Copy(pod.Annotations, p.Annotations)
 	if p.Meta.NodeName != "" {
 		pod.Spec.NodeSelector = map[string]string{
 			ipmanv1.NodeSelectorHostName: p.Meta.NodeName,
@@ -89,11 +94,11 @@ type PodMeta struct {
 // NodeState represents the state of all IPMan pods on a specific node
 // +k8s:deepcopy-gen=true
 type NodeState struct {
-	Charon    *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
-	Proxy     *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
-	Xfrms     []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
-	NodeName  string                   `json:"name" diff:"name"`
-	MachineID string                   `json:"machine_id" diff:"machine_id"`
+	Charon    *IpmanPod[CharonPodSpec]  `json:"charon" diff:"charon"`
+	Proxy     *IpmanPod[RestctlPodSpec] `json:"proxy" diff:"proxy"`
+	Xfrms     []IpmanPod[XfrmPodSpec]   `json:"xfrms" diff:"xfrms"`
+	NodeName  string                    `json:"name" diff:"name"`
+	MachineID string                    `json:"machine_id" diff:"machine_id"`
 }
 
 type NodeInfo struct {
