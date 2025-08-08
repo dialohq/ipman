@@ -188,7 +188,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						HostPath: "/var/run/ipman",
 					},
 				},
-				Proxy: &IpmanPod[RestctlPodSpec]{
+				Proxy: &IpmanPod[ProxyPodSpec]{
 					Meta: PodMeta{
 						Name:      "restctl-pod-aaabbbcccdddeeefff",
 						Namespace: "ipman-system",
@@ -196,7 +196,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						NodeID:    "aaabbbcccdddeeefff",
 						Image:     "caddy:2.10.0-alpine",
 					},
-					Spec: RestctlPodSpec{
+					Spec: ProxyPodSpec{
 						HostPath: "/var/run/ipman",
 						Configs:  []ipmanv1.IPSecConnectionSpec{c.Spec},
 					},
@@ -225,7 +225,7 @@ func TestCreatingDesiredState(t *testing.T) {
 								VxlanIP:         "10.0.2.2/24",
 							},
 						},
-						},
+					},
 					{
 						Meta: PodMeta{
 							Name:      "xfrm-pod-4s-sodies-nix",
@@ -248,7 +248,7 @@ func TestCreatingDesiredState(t *testing.T) {
 								InterfaceID:     201,
 							},
 						},
-						},
+					},
 				},
 				NodeName:  "localcluster",
 				MachineID: "aaabbbcccdddeeefff",
@@ -265,7 +265,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						HostPath: "/var/run/ipman",
 					},
 				},
-				Proxy: &IpmanPod[RestctlPodSpec]{
+				Proxy: &IpmanPod[ProxyPodSpec]{
 					Meta: PodMeta{
 						Name:      "restctl-pod-fffeeedddcccbbbaaa",
 						Namespace: "ipman-system",
@@ -273,7 +273,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						NodeName:  "localcluster2",
 						Image:     "caddy:2.10.0-alpine",
 					},
-					Spec: RestctlPodSpec{
+					Spec: ProxyPodSpec{
 						HostPath: "/var/run/ipman",
 						Configs:  []ipmanv1.IPSecConnectionSpec{c2.Spec},
 					},
@@ -302,7 +302,7 @@ func TestCreatingDesiredState(t *testing.T) {
 								VxlanIP:         "10.0.2.2/24",
 							},
 						},
-						},
+					},
 					{
 						Meta: PodMeta{
 							Name:      "xfrm-pod-8s-sodies-nix2",
@@ -325,7 +325,7 @@ func TestCreatingDesiredState(t *testing.T) {
 								InterfaceID:     202,
 							},
 						},
-						},
+					},
 				},
 				NodeName:  "localcluster2",
 				MachineID: "fffeeedddcccbbbaaa",
@@ -347,11 +347,11 @@ func TestCreatingDesiredState(t *testing.T) {
 	// Use JSON comparison with normalization for nil vs empty annotations
 	actualJson, _ := json.Marshal(ds)
 	expectedJson, _ := json.Marshal(actualDs)
-	
+
 	// Normalize nil annotations to empty objects for comparison
 	actualStr := strings.ReplaceAll(string(actualJson), `"annotations":null`, `"annotations":{}`)
 	expectedStr := strings.ReplaceAll(string(expectedJson), `"annotations":null`, `"annotations":{}`)
-	
+
 	if actualStr != expectedStr {
 		t.Errorf("States are not functionally equal after normalization")
 	}

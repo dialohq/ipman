@@ -17,7 +17,7 @@ type IpmanPodSpec interface {
 	ApplySpec(*corev1.Pod, Envs)
 	CompleteSetup(*IPSecConnectionReconciler, *corev1.Pod, string) error
 	CompleteDeletion(*IPSecConnectionReconciler, *corev1.Pod, string) error
-	CharonPodSpec | RestctlPodSpec | XfrmPodSpec
+	CharonPodSpec | ProxyPodSpec | XfrmPodSpec
 }
 
 // IpmanPod is a generic container for IPMan pod resources with their specifications
@@ -34,7 +34,7 @@ func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 	switch any(p.Spec).(type) {
 	case CharonPodSpec:
 		typeLabel = ipmanv1.LabelValueCharonPod
-	case RestctlPodSpec:
+	case ProxyPodSpec:
 		typeLabel = ipmanv1.LabelValueRestctlPod
 	case XfrmPodSpec:
 		typeLabel = ipmanv1.LabelValueXfrmPod
@@ -94,11 +94,11 @@ type PodMeta struct {
 // NodeState represents the state of all IPMan pods on a specific node
 // +k8s:deepcopy-gen=true
 type NodeState struct {
-	Charon    *IpmanPod[CharonPodSpec]  `json:"charon" diff:"charon"`
-	Proxy     *IpmanPod[RestctlPodSpec] `json:"proxy" diff:"proxy"`
-	Xfrms     []IpmanPod[XfrmPodSpec]   `json:"xfrms" diff:"xfrms"`
-	NodeName  string                    `json:"name" diff:"name"`
-	MachineID string                    `json:"machine_id" diff:"machine_id"`
+	Charon    *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
+	Proxy     *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
+	Xfrms     []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
+	NodeName  string                   `json:"name" diff:"name"`
+	MachineID string                   `json:"machine_id" diff:"machine_id"`
 }
 
 type NodeInfo struct {

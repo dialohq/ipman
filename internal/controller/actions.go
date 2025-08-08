@@ -430,7 +430,7 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	if resp.StatusCode != 200 {
 		return rd
 	}
-	spec := RestctlPodSpec{}
+	spec := ProxyPodSpec{}
 	err = json.Unmarshal([]byte(pod.Annotations[ipmanv1.AnnotationSpec]), &spec)
 	if err != nil {
 		return fmt.Errorf("Couldn't unmarshal spec: %w", err)

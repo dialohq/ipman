@@ -9,14 +9,14 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 )
 
-// RestctlPodSpec defines the specification for a Restctl pod
-type RestctlPodSpec struct {
+// ProxyPodSpec defines the specification for a Restctl pod
+type ProxyPodSpec struct {
 	HostPath string                        `json:"host_path" diff:"host_path"`
 	Configs  []ipmanv1.IPSecConnectionSpec `json:"configs" diff:"configs"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for RestctlPodSpec
-func (s RestctlPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
+func (s ProxyPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 	p.Spec.Volumes = []corev1.Volume{
 		createCharonSocketVolume(e.HostSocketsPath),
 	}
@@ -69,7 +69,7 @@ func groupConnsByNode(list []ipmanv1.IPSecConnection) map[string][]ipmanv1.IPSec
 	return ipmen
 }
 
-func (s RestctlPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
 	ctx := context.Background()
 	list := &ipmanv1.IPSecConnectionList{}
 	err := r.List(ctx, list)
@@ -108,7 +108,7 @@ func (s RestctlPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.
 	}
 	return nil
 }
-func (s RestctlPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s ProxyPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
 	ctx := context.Background()
 	// TODO: maybe should add another CR for global state?
 	list := ipmanv1.IPSecConnectionList{}

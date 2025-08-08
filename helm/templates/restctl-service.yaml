@@ -5,8 +5,8 @@ metadata:
   namespace: {{ .Values.global.namespace }}
 spec:
   selector: 
-    ipserviced: "true"
+    ipman.dialo.ai/type: "restctl"
   ports:
   - protocol: TCP
-    port: 80
-    targetPort: 80
+    port: 61410
+    targetPort: 61410
