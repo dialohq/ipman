@@ -336,6 +336,14 @@ func (wh *ValidatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Req
 			writeResponseDenied(w, in, err.Error())
 			return
 		}
+		groupRef := newIPSecConnection.Spec.Group
+		charonGroup := ipmanv1.CharonGroup{}
+		err = wh.Client.Get(ctx, types.NamespacedName{Namespace: groupRef.Namespace, Name: groupRef.Name}, &charonGroup)
+		if err != nil {
+			err = fmt.Errorf("Couldn't get charon group %s: %w", groupRef.Name, err)
+			writeResponseDenied(w, in, err.Error())
+			return
+		}
 		verdict, err = validateIPSecConnectionCreation(*newIPSecConnection, ipsecconnections.Items, allPods.Items)
 
 	case deletionAction:

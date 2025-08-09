@@ -18,10 +18,9 @@ type ProxyPodSpec struct {
 // ApplySpec implements the IpmanPodSpec interface for RestctlPodSpec
 func (s ProxyPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 	p.Spec.Volumes = []corev1.Volume{
-		createCharonSocketVolume(e.HostSocketsPath),
+		createCharonSocketVolume(s.HostPath),
 	}
 	p.Spec.HostPID = true
-	p.Spec.HostNetwork = true
 	p.Spec.Containers = []corev1.Container{
 		{
 			Name:            ipmanv1.RestctlContainerName,
@@ -58,18 +57,18 @@ func (s ProxyPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 	}
 }
 
-func groupConnsByNode(list []ipmanv1.IPSecConnection) map[string][]ipmanv1.IPSecConnection {
-	ipmen := map[string][]ipmanv1.IPSecConnection{}
-	for _, im := range list {
-		if _, ok := ipmen[im.Spec.NodeName]; !ok {
-			ipmen[im.Spec.NodeName] = []ipmanv1.IPSecConnection{}
+func groupConnsByGroup(list []ipmanv1.IPSecConnection) map[types.NamespacedName][]ipmanv1.IPSecConnection {
+	conns := map[types.NamespacedName][]ipmanv1.IPSecConnection{}
+	for _, c := range list {
+		if _, ok := conns[c.Spec.Group.Nsn()]; !ok {
+			conns[c.Spec.Group.Nsn()] = []ipmanv1.IPSecConnection{}
 		}
-		ipmen[im.Spec.NodeName] = append(ipmen[im.Spec.NodeName], im)
+		conns[c.Spec.Group.Nsn()] = append(conns[c.Spec.Group.Nsn()], c)
 	}
-	return ipmen
+	return conns
 }
 
-func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	ctx := context.Background()
 	list := &ipmanv1.IPSecConnectionList{}
 	err := r.List(ctx, list)
@@ -92,13 +91,13 @@ func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Po
 		return err
 	}
 
-	byNode := groupConnsByNode(list.Items)
-	conns, ok := byNode[node]
+	byGroup := groupConnsByGroup(list.Items)
+	conns, ok := byGroup[groupNsn]
 	if !ok {
-		return fmt.Errorf("Node '%s' not found", node)
+		return fmt.Errorf("Group '%s' not found", groupNsn)
 	}
 	for _, c := range conns {
-		if c.Spec.NodeName == node {
+		if c.Spec.Group.Nsn().Name == groupNsn.Name && c.Spec.Group.Nsn().Namespace == groupNsn.Namespace {
 			c.Status.CharonProxyIP = pod.Status.PodIP
 			err = r.Status().Update(ctx, &c)
 			if err != nil {
@@ -108,18 +107,17 @@ func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Po
 	}
 	return nil
 }
-func (s ProxyPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s ProxyPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	ctx := context.Background()
-	// TODO: maybe should add another CR for global state?
 	list := ipmanv1.IPSecConnectionList{}
 	err := r.List(ctx, &list)
 	if err != nil {
 		return fmt.Errorf("Couldn't fetch list of connections to complete deletion")
 	}
-	byNode := groupConnsByNode(list.Items)
-	conns, ok := byNode[node]
+	byGroup := groupConnsByGroup(list.Items)
+	conns, ok := byGroup[groupNsn]
 	if !ok {
-		return fmt.Errorf("Node '%s' not found", node)
+		return fmt.Errorf("Node '%s' not found", groupNsn)
 	}
 	for _, c := range conns {
 		c.Status.CharonProxyIP = ""

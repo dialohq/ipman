@@ -261,20 +261,20 @@ func TestAddIPSecConnection(t *testing.T) {
 	assert.NoError(t, err, "Getting current cluster state should not error")
 
 	// Verify current state has one node with expected pods
-	assert.Equal(t, 2, len(currentState.Nodes), "Current state should have 2 nodes")
+	assert.Equal(t, 2, len(currentState.Groups), "Current state should have 2 nodes")
 
 	// Find the node1 state
-	var node1State *NodeState
-	for i := range currentState.Nodes {
-		t.Logf("Node: %s, Xfrms: %d", currentState.Nodes[i].NodeName, len(currentState.Nodes[i].Xfrms))
-		if len(currentState.Nodes[i].Xfrms) > 0 {
-			for j, x := range currentState.Nodes[i].Xfrms {
+	var node1State *GroupState
+	for i := range currentState.Groups {
+		t.Logf("Node: %s, Xfrms: %d", currentState.Groups[i].NodeName, len(currentState.Groups[i].Xfrms))
+		if len(currentState.Groups[i].Xfrms) > 0 {
+			for j, x := range currentState.Groups[i].Xfrms {
 				t.Logf("Xfrm pod %d: %+v", j, x)
 				t.Logf("Xfrm pod %d Meta: %+v", j, x.Meta)
 			}
 		}
-		if currentState.Nodes[i].NodeName == "node1" {
-			node1State = &currentState.Nodes[i]
+		if currentState.Groups[i].NodeName == "node1" {
+			node1State = &currentState.Groups[i]
 			break
 		}
 	}
@@ -294,15 +294,15 @@ func TestAddIPSecConnection(t *testing.T) {
 	assert.NoError(t, err, "Creating desired state should not error")
 
 	// Verify desired state
-	assert.Equal(t, 2, len(desiredState.Nodes), "Desired state should have 2 nodes")
+	assert.Equal(t, 2, len(desiredState.Groups), "Desired state should have 2 nodes")
 
 	// Find the node states in the desired state
-	var desiredNode1State, desiredNode2State *NodeState
-	for i := range desiredState.Nodes {
-		if desiredState.Nodes[i].NodeName == "node1" {
-			desiredNode1State = &desiredState.Nodes[i]
-		} else if desiredState.Nodes[i].NodeName == "node2" {
-			desiredNode2State = &desiredState.Nodes[i]
+	var desiredNode1State, desiredNode2State *GroupState
+	for i := range desiredState.Groups {
+		if desiredState.Groups[i].NodeName == "node1" {
+			desiredNode1State = &desiredState.Groups[i]
+		} else if desiredState.Groups[i].NodeName == "node2" {
+			desiredNode2State = &desiredState.Groups[i]
 		}
 	}
 

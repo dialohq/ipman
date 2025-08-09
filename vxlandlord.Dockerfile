@@ -5,7 +5,6 @@ WORKDIR /workspace
 ARG PLATFORM=arm64
 
 ENV GOCACHE=/build
-COPY ./goviciclient ./goviciclient
 COPY go.mod go.sum ./
 RUN go mod download
 COPY cmd/vxlandlord/ ./cmd/vxlandlord/

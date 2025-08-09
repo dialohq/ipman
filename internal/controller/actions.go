@@ -98,7 +98,7 @@ func (a *CreatePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconcile
 	if err != nil {
 		return err
 	}
-	return a.Pod.Spec.CompleteSetup(r, finishedPod, a.Pod.Meta.NodeName)
+	return a.Pod.Spec.CompleteSetup(r, finishedPod, a.Pod.Group.Nsn())
 }
 
 // DeletePodAction represents an action to delete a pod of a specific type
@@ -118,7 +118,7 @@ func (a *DeletePodAction[S]) Do(ctx context.Context, r *IPSecConnectionReconcile
 	if err != nil {
 		return fmt.Errorf("Couldn't list ipmen while deleting pod: %w", err)
 	}
-	a.Pod.Spec.CompleteDeletion(r, &pod, a.Pod.Meta.NodeName)
+	a.Pod.Spec.CompleteDeletion(r, &pod, a.Pod.Group.Nsn())
 	return nil
 }
 
@@ -387,9 +387,22 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 			time.Sleep(time.Second)
 		}
 	}
+	groups := map[string]ipmanv1.CharonGroup{}
+	for _, c := range a.Configs {
+		g, err := r.GetGroup(c.Spec.Group)
+		if err != nil {
+			return err
+		}
+		groups[c.Name] = g
+	}
+
 	secrets := map[string]string{}
 	for _, conn := range a.Configs {
-		if conn.Spec.NodeName == pod.Spec.NodeName {
+		group := groups[conn.Name]
+		if err != nil {
+			return err
+		}
+		if group.Spec.NodeName == pod.Spec.NodeName {
 			sec := &corev1.Secret{}
 			err := r.Get(context.Background(), types.NamespacedName{Name: conn.Spec.SecretRef.Name, Namespace: conn.Spec.SecretRef.Namespace}, sec)
 			if err != nil {
@@ -403,7 +416,11 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	}
 	d := []ipmanv1.ConnData{}
 	for _, c := range a.Configs {
-		if c.Spec.NodeName == pod.Spec.NodeName {
+		group := groups[c.Name]
+		if err != nil {
+			return err
+		}
+		if group.Spec.NodeName == pod.Spec.NodeName {
 			d = append(d, ipmanv1.ConnData{
 				Secret:          secrets[c.Name],
 				IPSecConnection: c,

@@ -2,6 +2,7 @@ package v1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // SecretRef holds a reference to a specific key in a Kubernetes Secret, including its name, namespace, and key.
@@ -32,6 +33,10 @@ type IPSecConnection struct {
 
 	Spec   IPSecConnectionSpec   `json:"spec,omitempty"`
 	Status IPSecConnectionStatus `json:"status,omitempty"`
+}
+
+func (c *IPSecConnection) Nsn() types.NamespacedName {
+	return types.NamespacedName{Name: c.Name, Namespace: c.Namespace}
 }
 
 // IPSecConnectionList contains a list of IPSecConnection resources.

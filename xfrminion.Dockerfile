@@ -6,7 +6,6 @@ ARG PLATFORM=arm64
 
 ENV GOCACHE=/build
 COPY go.mod go.sum ./
-COPY ./goviciclient ./goviciclient
 RUN go mod download
 COPY cmd/xfrminion/ ./cmd/xfrminion/
 COPY internal ./internal

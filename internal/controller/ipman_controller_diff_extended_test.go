@@ -13,11 +13,11 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 	// Case 1: Empty desired state, non-empty current state
 	t.Run("Empty desired state", func(t *testing.T) {
 		desiredState := &ClusterState{
-			Nodes: []NodeState{},
+			Groups: []GroupState{},
 		}
 
 		currentState := &ClusterState{
-			Nodes: []NodeState{
+			Groups: []GroupState{
 				{
 					Charon: &IpmanPod[CharonPodSpec]{
 						Meta: PodMeta{
@@ -81,7 +81,7 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 	// Case 2: Empty current state, non-empty desired state
 	t.Run("Empty current state", func(t *testing.T) {
 		desiredState := &ClusterState{
-			Nodes: []NodeState{
+			Groups: []GroupState{
 				{
 					Charon: &IpmanPod[CharonPodSpec]{
 						Meta: PodMeta{
@@ -128,7 +128,7 @@ func TestDiffStatesWithEmptyNodes(t *testing.T) {
 		}
 
 		currentState := &ClusterState{
-			Nodes: []NodeState{},
+			Groups: []GroupState{},
 		}
 
 		// Same note as above - current implementation assumes same node count
@@ -238,7 +238,7 @@ func TestDiffStatesWithXfrmPods(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			// Create node states with the test Xfrm pods
 			desiredState := &ClusterState{
-				Nodes: []NodeState{
+				Groups: []GroupState{
 					{
 						Charon: nil,
 						Proxy:  nil,
@@ -248,7 +248,7 @@ func TestDiffStatesWithXfrmPods(t *testing.T) {
 			}
 
 			currentState := &ClusterState{
-				Nodes: []NodeState{
+				Groups: []GroupState{
 					{
 						Charon: nil,
 						Proxy:  nil,
@@ -283,8 +283,8 @@ func TestDiffStatesWithXfrmPods(t *testing.T) {
 // TestDiffStatesWithDifferentNodeCounts tests how DiffStates handles states with different node counts
 func TestDiffStatesWithDifferentNodeCounts(t *testing.T) {
 	// Create a test node state
-	createNodeState := func(nodeName string) NodeState {
-		return NodeState{
+	createNodeState := func(nodeName string) GroupState {
+		return GroupState{
 			Charon: &IpmanPod[CharonPodSpec]{
 				Meta: PodMeta{
 					Name:      "charon-pod-" + nodeName,
@@ -312,14 +312,14 @@ func TestDiffStatesWithDifferentNodeCounts(t *testing.T) {
 	// Case 1: More nodes in desired state than current state
 	t.Run("More desired nodes", func(t *testing.T) {
 		desiredState := &ClusterState{
-			Nodes: []NodeState{
+			Groups: []GroupState{
 				createNodeState("node1"),
 				createNodeState("node2"),
 			},
 		}
 
 		currentState := &ClusterState{
-			Nodes: []NodeState{
+			Groups: []GroupState{
 				createNodeState("node1"),
 			},
 		}
@@ -342,13 +342,13 @@ func TestDiffStatesWithDifferentNodeCounts(t *testing.T) {
 	// Case 2: More nodes in current state than desired state
 	t.Run("More current nodes", func(t *testing.T) {
 		desiredState := &ClusterState{
-			Nodes: []NodeState{
+			Groups: []GroupState{
 				createNodeState("node1"),
 			},
 		}
 
 		currentState := &ClusterState{
-			Nodes: []NodeState{
+			Groups: []GroupState{
 				createNodeState("node1"),
 				createNodeState("node2"),
 			},
@@ -383,7 +383,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			name: "Nested change in Charon hostPath",
 			setupDesired: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -404,7 +404,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			},
 			setupCurrent: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -429,7 +429,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			name: "Nested change in Xfrm properties",
 			setupDesired: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: nil,
 							Proxy:  nil,
@@ -459,7 +459,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			},
 			setupCurrent: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: nil,
 							Proxy:  nil,
@@ -493,7 +493,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			name: "Multiple nested changes",
 			setupDesired: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -514,7 +514,7 @@ func TestDiffStatesWithNestedChanges(t *testing.T) {
 			},
 			setupCurrent: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{

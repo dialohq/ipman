@@ -64,6 +64,7 @@ func main() {
 		XfrminionImage:           os.Getenv("XFRMINION_IMAGE"),
 		VxlandlordImage:          os.Getenv("VXLANDLORD_IMAGE"),
 		XfrminjectorImage:        os.Getenv("XFRMINJECTOR_IMAGE"),
+		XfrminjectorPullPolicy:   os.Getenv("XFRMINJECTOR_PULL_POLICY"),
 		XfrminjectorTTL:          ttl,
 		RestctlImage:             os.Getenv("RESTCTL_IMAGE"),
 		RestctlPullPolicy:        os.Getenv("RESTCTL_PULL_POLICY"),

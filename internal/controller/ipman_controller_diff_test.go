@@ -595,7 +595,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			name: "Identical states",
 			desiredState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -616,7 +616,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			},
 			currentState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -641,7 +641,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			name: "Missing Charon pod in current",
 			desiredState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -662,7 +662,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			},
 			currentState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: nil,
 							Proxy:  nil,
@@ -677,7 +677,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			name: "Different Charon image",
 			desiredState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -698,7 +698,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			},
 			currentState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -723,7 +723,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			name: "Missing Proxy pod in current",
 			desiredState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: nil,
 							Proxy: &IpmanPod[ProxyPodSpec]{
@@ -742,7 +742,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			},
 			currentState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: nil,
 							Proxy:  nil,
@@ -757,7 +757,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			name: "Multiple pod differences",
 			desiredState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -778,7 +778,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 			},
 			currentState: func() *ClusterState {
 				return &ClusterState{
-					Nodes: []NodeState{
+					Groups: []GroupState{
 						{
 							Charon: &IpmanPod[CharonPodSpec]{
 								Meta: PodMeta{
@@ -837,7 +837,7 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 func TestCharonPodImageChanged(t *testing.T) {
 	// Create current state with a Charon pod directly in-line
 	currentState := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
@@ -857,11 +857,11 @@ func TestCharonPodImageChanged(t *testing.T) {
 	}
 
 	// Store the original image for verification later
-	originalImage := currentState.Nodes[0].Charon.Meta.Image
+	originalImage := currentState.Groups[0].Charon.Meta.Image
 
 	// Create a separate desired state with a different image
 	desiredState := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
@@ -888,9 +888,9 @@ func TestCharonPodImageChanged(t *testing.T) {
 	}
 
 	// Verify that changing the desired state didn't affect the current state
-	if currentState.Nodes[0].Charon.Meta.Image != originalImage {
+	if currentState.Groups[0].Charon.Meta.Image != originalImage {
 		t.Errorf("Current pod image was changed to %s, should still be '%s'",
-			currentState.Nodes[0].Charon.Meta.Image, originalImage)
+			currentState.Groups[0].Charon.Meta.Image, originalImage)
 	}
 
 	// Verify that actions were generated (should be 2: delete and create)

@@ -36,6 +36,17 @@ spec:
                 - remoteId
                 - secretRef
               properties:
+                groupRef:
+                  type: object
+                  required:
+                    - name
+                    - namespace
+                  properties:
+                    name:
+                      type: string
+                    namespace:
+                      type: string
+
                 extra:
                   type: object
                   additionalProperties:

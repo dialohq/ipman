@@ -60,7 +60,7 @@ charon:
 	docker build -t $(LOCAL_REGISTRY)/charon:latest-dev --platform linux/arm64 --file ./charon.Dockerfile .
 	docker push $(LOCAL_REGISTRY)/charon:latest-dev 
 injector:
-	docker build -t $(LOCAL_REGISTRY)/xfrminjector:latest-dev-again2 --platform linux/arm64 --file ./xfrminjector.Dockerfile .
-	docker push $(LOCAL_REGISTRY)/xfrminjector:latest-dev-again2 
+	docker build -t $(LOCAL_REGISTRY)/xfrminjector:latest-dev --platform linux/arm64 --file ./xfrminjector.Dockerfile .
+	docker push $(LOCAL_REGISTRY)/xfrminjector:latest-dev 
 
 all: vxlandlord xfrminion restctl operator charon injector

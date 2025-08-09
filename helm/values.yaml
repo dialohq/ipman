@@ -12,8 +12,8 @@ global:
 controller:
   podTimeoutSeconds: 60
   replicaCount: 1
-  image: "plan9better/operator:0.1.13"
-  pullPolicy: IfNotPresent
+  image: "192.168.10.201:5000/operator:latest-dev"
+  pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -30,23 +30,28 @@ controller:
 # Caddy proxy configuration
 caddy:
   image: "caddy:2.10.0-alpine"
-  pullPolicy: "IfNotPresent"
+  pullPolicy: "Always"
 # Restctl service configuration
 restctl:
-  image: "plan9better/restctl:0.1.13"
-  pullPolicy: "IfNotPresent"
+  image: "192.168.10.201:5000/restctl:latest-dev"
+  pullPolicy: "Always"
+# Xfrminjector configuration
+xfrminjector:
+  image: "192.168.10.201:5000/xfrminjector:latest-dev"
+  pullPolicy: "Always"
+  ttlSeconds: 120
 # VxlanLord configuration
 vxlandlord:
-  image: "plan9better/vxlandlord:0.1.13"
-  pullPolicy: "IfNotPresent"
+  image: "192.168.10.201:5000/vxlandlord:latest-dev"
+  pullPolicy: "Always"
 # XfrmMinion configuration
 xfrminion:
-  image: "plan9better/xfrminion:0.1.13"
-  pullPolicy: "IfNotPresent"
+  image: "192.168.10.201:5000/xfrminion:latest-dev"
+  pullPolicy: "Always"
 # Charon daemon configuration
 charon:
-  image: "plan9better/charon:0.1.13"
-  pullPolicy: "IfNotPresent"
+  image: "192.168.10.201:5000/charon:latest-dev"
+  pullPolicy: "Always"
 # Webhook configuration
 webhook:
   serviceName: "ipman-webhook-service"

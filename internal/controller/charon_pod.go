@@ -3,11 +3,13 @@ package controller
 import (
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // CharonPodSpec defines the specification for a Charon pod with restctl container
 type CharonPodSpec struct {
-	HostPath string `json:"host_path" diff:"host_path"`
+	HostPath    string `json:"host_path" diff:"host_path"`
+	HostNetwork bool   `json:"host_network"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for CharonPodSpec
@@ -43,15 +45,18 @@ func (s CharonPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 			},
 		},
 	}
-	p.Spec.HostNetwork = true
+	p.Spec.HostNetwork = s.HostNetwork
+	// Has to be in host pid since charon creates
+	// a file 'charon.pid' that's later used to create
+	// xfrm interface from the root interface
 	p.Spec.HostPID = true
 	p.Spec.RestartPolicy = corev1.RestartPolicyNever
 }
 
-func (s CharonPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s CharonPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	return nil
 }
-func (s CharonPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s CharonPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	return nil
 }
 

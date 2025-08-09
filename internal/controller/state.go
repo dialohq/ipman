@@ -7,6 +7,7 @@ import (
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // Route represents an IP address or CIDR used for routing
@@ -15,16 +16,17 @@ type Route string
 // IpmanPodSpec is an interface for different pod specifications used in IPMan
 type IpmanPodSpec interface {
 	ApplySpec(*corev1.Pod, Envs)
-	CompleteSetup(*IPSecConnectionReconciler, *corev1.Pod, string) error
-	CompleteDeletion(*IPSecConnectionReconciler, *corev1.Pod, string) error
+	CompleteSetup(*IPSecConnectionReconciler, *corev1.Pod, types.NamespacedName) error
+	CompleteDeletion(*IPSecConnectionReconciler, *corev1.Pod, types.NamespacedName) error
 	CharonPodSpec | ProxyPodSpec | XfrmPodSpec
 }
 
 // IpmanPod is a generic container for IPMan pod resources with their specifications
 type IpmanPod[Spec IpmanPodSpec] struct {
-	Meta        PodMeta           `json:"meta" diff:"meta"`
-	Spec        Spec              `json:"spec" diff:"spec"`
-	Annotations map[string]string `json:"annotations" diff:"annotations"`
+	Meta        PodMeta                `json:"meta" diff:"meta"`
+	Spec        Spec                   `json:"spec" diff:"spec"`
+	Annotations map[string]string      `json:"annotations" diff:"annotations"`
+	Group       ipmanv1.CharonGroupRef `json:"group" diff:"group"`
 }
 
 // CreateK8sPodMeta creates a Kubernetes Pod object with metadata from the IpmanPod
@@ -47,7 +49,9 @@ func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 			Name:      p.Meta.Name,
 			Namespace: p.Meta.Namespace,
 			Labels: map[string]string{
-				ipmanv1.LabelPodType: typeLabel,
+				ipmanv1.LabelPodType:        typeLabel,
+				ipmanv1.LabelGroupName:      p.Group.Name,
+				ipmanv1.LabelGroupNamespace: p.Group.Namespace,
 			},
 		},
 	}
@@ -87,30 +91,21 @@ type PodMeta struct {
 	Namespace string `json:"namespace" diff:"namespace"`
 	IP        string `json:"ip" diff:"-"`
 	NodeName  string `json:"node" diff:"node"`
-	NodeID    string `json:"node_id" diff:"node_id"`
 	Image     string `json:"image" diff:"image"`
 }
 
-// NodeState represents the state of all IPMan pods on a specific node
-// +k8s:deepcopy-gen=true
-type NodeState struct {
-	Charon    *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
-	Proxy     *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
-	Xfrms     []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
-	NodeName  string                   `json:"name" diff:"name"`
-	MachineID string                   `json:"machine_id" diff:"machine_id"`
-}
-
-type NodeInfo struct {
-	Name string
-	ID   string
+// GroupState represents the state of all IPMan pods on a specific node
+type GroupState struct {
+	Charon   *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
+	Proxy    *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
+	Xfrms    []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
+	GroupRef ipmanv1.CharonGroupRef
 }
 
 // ClusterState represents the state of all nodes in the cluster
-// +k8s:deepcopy-gen=true
 type ClusterState struct {
-	Nodes      []NodeState `json:"nodes" diff:"nodes"`
-	PodMonitor bool        `json:"pod_monitor" diff:"pod_monitor"`
+	Groups     []GroupState `json:"nodes" diff:"nodes"`
+	PodMonitor bool         `json:"pod_monitor" diff:"pod_monitor"`
 }
 
 type VxlanIP = string

@@ -33,8 +33,8 @@ func createTestReconciler() *IPSecConnectionReconciler {
 // TestDiffStatesComprehensive tests the DiffStates function more comprehensively
 func TestDiffStatesComprehensive(t *testing.T) {
 	// Helper function to create a basic NodeState
-	createBasicNodeState := func() NodeState {
-		return NodeState{
+	createBasicNodeState := func() GroupState {
+		return GroupState{
 			Charon: &IpmanPod[CharonPodSpec]{
 				Meta: PodMeta{
 					Name:      "charon-pod-test",
@@ -82,22 +82,22 @@ func TestDiffStatesComprehensive(t *testing.T) {
 
 	tests := []struct {
 		name            string
-		setupDesired    func(ns NodeState) NodeState
-		setupCurrent    func(ns NodeState) NodeState
+		setupDesired    func(ns GroupState) GroupState
+		setupCurrent    func(ns GroupState) GroupState
 		expectedActions int
 		validateActions func(t *testing.T, actions []Action)
 	}{
 		{
 			name: "Identical states",
-			setupDesired: func(ns NodeState) NodeState {
+			setupDesired: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			setupCurrent: func(ns NodeState) NodeState {
+			setupCurrent: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
@@ -106,14 +106,14 @@ func TestDiffStatesComprehensive(t *testing.T) {
 		},
 		{
 			name: "All pods missing in current state",
-			setupDesired: func(ns NodeState) NodeState {
+			setupDesired: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
-			setupCurrent: func(ns NodeState) NodeState {
-				return NodeState{
+			setupCurrent: func(ns GroupState) GroupState {
+				return GroupState{
 					Charon: nil,
 					Proxy:  nil,
 					Xfrms:  []IpmanPod[XfrmPodSpec]{},
@@ -140,16 +140,16 @@ func TestDiffStatesComprehensive(t *testing.T) {
 		},
 		{
 			name: "All pods missing in desired state",
-			setupDesired: func(ns NodeState) NodeState {
-				return NodeState{
+			setupDesired: func(ns GroupState) GroupState {
+				return GroupState{
 					Charon: nil,
 					Proxy:  nil,
 					Xfrms:  []IpmanPod[XfrmPodSpec]{},
 				}
 			},
-			setupCurrent: func(ns NodeState) NodeState {
+			setupCurrent: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
@@ -171,16 +171,16 @@ func TestDiffStatesComprehensive(t *testing.T) {
 		},
 		{
 			name: "Charon pod image changed",
-			setupDesired: func(ns NodeState) NodeState {
+			setupDesired: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				ns2.Charon.Meta.Image = "new-image"
 				return *ns2
 			},
-			setupCurrent: func(ns NodeState) NodeState {
+			setupCurrent: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
@@ -198,18 +198,18 @@ func TestDiffStatesComprehensive(t *testing.T) {
 		},
 		{
 			name: "All pod specs changed",
-			setupDesired: func(ns NodeState) NodeState {
+			setupDesired: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				ns2.Charon.Meta.Image = "new-charon-image"
 				ns2.Proxy.Meta.Image = "new-proxy-image"
 				ns2.Charon.Spec.HostPath = "/new/path"
 				return *ns2
 			},
-			setupCurrent: func(ns NodeState) NodeState {
+			setupCurrent: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
@@ -222,9 +222,9 @@ func TestDiffStatesComprehensive(t *testing.T) {
 		},
 		{
 			name: "Node changed for all pods",
-			setupDesired: func(ns NodeState) NodeState {
+			setupDesired: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				ns2.Charon.Meta.NodeName = "new-node"
 				ns2.Proxy.Meta.NodeName = "new-node"
@@ -233,9 +233,9 @@ func TestDiffStatesComprehensive(t *testing.T) {
 				}
 				return *ns2
 			},
-			setupCurrent: func(ns NodeState) NodeState {
+			setupCurrent: func(ns GroupState) GroupState {
 				out, _ := json.Marshal(ns)
-				ns2 := &NodeState{}
+				ns2 := &GroupState{}
 				_ = json.Unmarshal(out, ns2)
 				return *ns2
 			},
@@ -306,13 +306,13 @@ func TestDiffStatesComprehensive(t *testing.T) {
 			baseNodeState := createBasicNodeState()
 
 			desiredState := &ClusterState{
-				Nodes: []NodeState{
+				Groups: []GroupState{
 					tt.setupDesired(baseNodeState),
 				},
 			}
 
 			currentState := &ClusterState{
-				Nodes: []NodeState{
+				Groups: []GroupState{
 					tt.setupCurrent(baseNodeState),
 				},
 			}
@@ -342,7 +342,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 
 // TestDiffStatesWithMultipleNodes tests DiffStates with multiple nodes
 func TestDiffStatesWithMultipleNodes(t *testing.T) {
-	node1 := NodeState{
+	node1 := GroupState{
 		Charon: &IpmanPod[CharonPodSpec]{
 			Meta: PodMeta{
 				Name:      "charon-pod-node1",
@@ -359,7 +359,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 		NodeName: "localcluster",
 	}
 
-	node2 := NodeState{
+	node2 := GroupState{
 		Charon: &IpmanPod[CharonPodSpec]{
 			Meta: PodMeta{
 				Name:      "charon-pod-node2",
@@ -404,19 +404,19 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 	}
 
 	out, _ := json.Marshal(node1)
-	changed_node1 := NodeState{}
+	changed_node1 := GroupState{}
 	_ = json.Unmarshal(out, &changed_node1)
 	changed_node1.Charon.Meta.Image = "new-charon-image"
 	fmt.Println(string(out))
 
 	out, _ = json.Marshal(node2)
-	changed_node2 := NodeState{}
+	changed_node2 := GroupState{}
 	_ = json.Unmarshal(out, &changed_node2)
 	changed_node2.Proxy.Meta.Image = "new-proxy-image"
 	fmt.Println(string(out))
 
 	out, _ = json.Marshal(node1)
-	node_with_pods1 := NodeState{}
+	node_with_pods1 := GroupState{}
 	_ = json.Unmarshal(out, &node_with_pods1)
 	fmt.Println(string(out))
 	node_with_pods1.Proxy = &IpmanPod[ProxyPodSpec]{
@@ -430,7 +430,7 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 	}
 
 	out, _ = json.Marshal(node2)
-	node_with_pods2 := NodeState{}
+	node_with_pods2 := GroupState{}
 	_ = json.Unmarshal(out, &node_with_pods2)
 	fmt.Println(string(out))
 	fmt.Println(string(out))
@@ -444,38 +444,38 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 	}{
 		{
 			name:            "Identical multi-node state",
-			desiredSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
+			desiredSetup:    ClusterState{Groups: []GroupState{node1, node2}},
+			currentSetup:    ClusterState{Groups: []GroupState{node1, node2}},
 			expectedActions: 0,
 		},
 		{
 			name:            "Change only on node1",
-			desiredSetup:    ClusterState{Nodes: []NodeState{changed_node1, node2}},
-			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
+			desiredSetup:    ClusterState{Groups: []GroupState{changed_node1, node2}},
+			currentSetup:    ClusterState{Groups: []GroupState{node1, node2}},
 			expectedActions: 0,
 		},
 		{
 			name:            "Change only on node2",
-			desiredSetup:    ClusterState{Nodes: []NodeState{node1, changed_node2}},
-			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
+			desiredSetup:    ClusterState{Groups: []GroupState{node1, changed_node2}},
+			currentSetup:    ClusterState{Groups: []GroupState{node1, node2}},
 			expectedActions: 0,
 		},
 		{
 			name:            "Changes on both nodes",
-			desiredSetup:    ClusterState{Nodes: []NodeState{changed_node1, changed_node2}},
-			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
+			desiredSetup:    ClusterState{Groups: []GroupState{changed_node1, changed_node2}},
+			currentSetup:    ClusterState{Groups: []GroupState{node1, node2}},
 			expectedActions: 0, // Delete and create for both nodes
 		},
 		{
 			name:            "Add missing pods on both nodes",
-			desiredSetup:    ClusterState{Nodes: []NodeState{node_with_pods1, node_with_pods2}},
-			currentSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
+			desiredSetup:    ClusterState{Groups: []GroupState{node_with_pods1, node_with_pods2}},
+			currentSetup:    ClusterState{Groups: []GroupState{node1, node2}},
 			expectedActions: 2, // Create for node1 Proxy, and override config
 		},
 		{
 			name:            "Remove pods from both nodes",
-			desiredSetup:    ClusterState{Nodes: []NodeState{node1, node2}},
-			currentSetup:    ClusterState{Nodes: []NodeState{node_with_pods1, node_with_pods2}},
+			desiredSetup:    ClusterState{Groups: []GroupState{node1, node2}},
+			currentSetup:    ClusterState{Groups: []GroupState{node_with_pods1, node_with_pods2}},
 			expectedActions: 1, // Delete for node1 Proxy
 		},
 	}

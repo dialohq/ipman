@@ -29,7 +29,7 @@ func TestDiffXfrmsImageChangeDetection(t *testing.T) {
 
 	// Create desired and current states
 	desired := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Xfrms: []IpmanPod[XfrmPodSpec]{
 					{
@@ -56,7 +56,7 @@ func TestDiffXfrmsImageChangeDetection(t *testing.T) {
 	}
 
 	current := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Xfrms: []IpmanPod[XfrmPodSpec]{
 					{
@@ -83,21 +83,21 @@ func TestDiffXfrmsImageChangeDetection(t *testing.T) {
 	}
 
 	// Store original values to check if they remain unmodified
-	desiredImage := desired.Nodes[0].Xfrms[0].Meta.Image
-	currentImage := current.Nodes[0].Xfrms[0].Meta.Image
+	desiredImage := desired.Groups[0].Xfrms[0].Meta.Image
+	currentImage := current.Groups[0].Xfrms[0].Meta.Image
 
 	// Test direct diffXfrms function
-	actions := diffXfrms(desired.Nodes[0].Xfrms, current.Nodes[0].Xfrms)
+	actions := diffXfrms(desired.Groups[0].Xfrms, current.Groups[0].Xfrms)
 
 	// Ensure original states are preserved
-	if desired.Nodes[0].Xfrms[0].Meta.Image != desiredImage {
+	if desired.Groups[0].Xfrms[0].Meta.Image != desiredImage {
 		t.Errorf("Desired state was modified: expected image '%s', got '%s'",
-			desiredImage, desired.Nodes[0].Xfrms[0].Meta.Image)
+			desiredImage, desired.Groups[0].Xfrms[0].Meta.Image)
 	}
 
-	if current.Nodes[0].Xfrms[0].Meta.Image != currentImage {
+	if current.Groups[0].Xfrms[0].Meta.Image != currentImage {
 		t.Errorf("Current state was modified: expected image '%s', got '%s'",
-			currentImage, current.Nodes[0].Xfrms[0].Meta.Image)
+			currentImage, current.Groups[0].Xfrms[0].Meta.Image)
 	}
 
 	// Verify actions are correct

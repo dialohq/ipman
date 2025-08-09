@@ -54,3 +54,11 @@ func ParseRequest(r http.Request) (*admissionv1.AdmissionReview, error) {
 
 	return &a, nil
 }
+
+func MapF[T any, R any](f func(v T) R, vs []T) []R {
+	result := make([]R, len(vs))
+	for idx, v := range vs {
+		result[idx] = f(v)
+	}
+	return result
+}

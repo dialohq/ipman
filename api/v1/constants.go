@@ -27,6 +27,9 @@ const (
 	LabelValueXfrmPod = "xfrm"
 	JobNamePrefix     = "ipman-injector"
 
+	LabelGroupName      = "ipman.dialo.ai/group"
+	LabelGroupNamespace = "ipman.dialo.ai/groupNamespace"
+
 	orgDomain                  = "ipman.dialo.ai"
 	AnnotationChildName        = orgDomain + "/childName"
 	AnnotationIpmanName        = orgDomain + "/ipmanName"

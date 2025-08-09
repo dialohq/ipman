@@ -49,7 +49,7 @@ func (s XfrmPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 	p.Spec.HostPID = true
 }
 
-func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	ctx := context.Background()
 	nsn := types.NamespacedName{Name: s.Props.OwnerConnection, Namespace: ""}
 	isc := &ipmanv1.IPSecConnection{}
@@ -84,7 +84,13 @@ func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod
 		return fmt.Errorf("Couldn't unmarshal response for xfrm '%s' PID: %w", pod.Name, err)
 	}
 
-	job := createXfrmJob(r, prd.Pid, int(s.Props.InterfaceID), s.Props.OwnerConnection, node)
+	group := ipmanv1.CharonGroup{}
+	err = r.Get(ctx, groupNsn, &group)
+	if err != nil {
+		return err
+	}
+
+	job := createXfrmJob(r, prd.Pid, int(s.Props.InterfaceID), s.Props.OwnerConnection, group)
 	err = r.Create(ctx, &job)
 	if err != nil {
 		if apierrors.IsAlreadyExists(err) {
@@ -166,11 +172,23 @@ func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod
 	return r.Status().Update(ctx, isc)
 }
 
-func createXfrmJob(r *IPSecConnectionReconciler, pid, id int, connName, nodeName string) batchv1.Job {
+func createXfrmJob(r *IPSecConnectionReconciler, pid, id int, connName string, group ipmanv1.CharonGroup) batchv1.Job {
 	var tgp int64 = 1
+	interfaceName := ""
+	if group.Spec.InterfaceName != nil {
+		interfaceName = *group.Spec.InterfaceName
+	}
+	path := strings.Join([]string{group.Name, group.Namespace}, "/")
+	fullPath := r.Env.HostSocketsPath
+	if strings.HasSuffix(fullPath, "/") {
+		fullPath += path
+	} else {
+		fullPath += "/" + path
+	}
+
 	return batchv1.Job{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      strings.Join([]string{ipmanv1.JobNamePrefix, connName, nodeName}, "-"),
+			Name:      strings.Join([]string{ipmanv1.JobNamePrefix, connName, group.Name}, "-"),
 			Namespace: r.Env.NamespaceName,
 		},
 		Spec: batchv1.JobSpec{
@@ -179,11 +197,11 @@ func createXfrmJob(r *IPSecConnectionReconciler, pid, id int, connName, nodeName
 				Spec: corev1.PodSpec{
 					RestartPolicy:                 corev1.RestartPolicyNever,
 					TerminationGracePeriodSeconds: &tgp,
-					HostNetwork:                   true,
 					HostPID:                       true,
 					NodeSelector: map[string]string{
-						"kubernetes.io/hostname": nodeName,
+						"kubernetes.io/hostname": group.Spec.NodeName,
 					},
+					Volumes: []corev1.Volume{createCharonSocketVolume(fullPath)},
 					Containers: []corev1.Container{
 						{
 							Name:            "create-vlan",
@@ -198,13 +216,23 @@ func createXfrmJob(r *IPSecConnectionReconciler, pid, id int, connName, nodeName
 									Name:  "XFRM_ID",
 									Value: strconv.FormatInt(int64(id), 10),
 								},
+								{
+									Name:  "INTERFACE_NAME",
+									Value: interfaceName,
+								},
+							},
+							VolumeMounts: []corev1.VolumeMount{
+								{
+									Name:      ipmanv1.CharonSocketHostVolumeName,
+									ReadOnly:  true,
+									MountPath: ipmanv1.CharonSocketVolumeMountPath,
+								},
 							},
 							SecurityContext: &corev1.SecurityContext{
 								Privileged: u.Ptr(true),
 								Capabilities: &corev1.Capabilities{
 									Add: []corev1.Capability{
 										"NET_ADMIN",
-										"NET_RAW",
 									},
 								},
 							},
@@ -253,7 +281,7 @@ func waitForJobCompletion(ctx context.Context, r *IPSecConnectionReconciler, job
 	return nil
 }
 
-func (s XfrmPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, node string) error {
+func (s XfrmPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	ctx := context.Background()
 	nsn := types.NamespacedName{Name: s.Props.OwnerConnection, Namespace: ""}
 	isc := &ipmanv1.IPSecConnection{}

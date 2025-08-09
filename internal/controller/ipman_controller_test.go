@@ -174,7 +174,7 @@ func TestCreatingDesiredState(t *testing.T) {
 		},
 	).Build()
 	actualDs := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
@@ -337,10 +337,10 @@ func TestCreatingDesiredState(t *testing.T) {
 		t.Errorf("Creating desired state returned an error: %v, desired: %v, received: %v", err, actualDs, ds)
 	}
 
-	slices.SortFunc(ds.Nodes, func(a, b NodeState) int {
+	slices.SortFunc(ds.Groups, func(a, b GroupState) int {
 		return strings.Compare(a.MachineID, b.MachineID)
 	})
-	slices.SortFunc(actualDs.Nodes, func(a, b NodeState) int {
+	slices.SortFunc(actualDs.Groups, func(a, b GroupState) int {
 		return strings.Compare(a.MachineID, b.MachineID)
 	})
 
@@ -372,7 +372,7 @@ func TestReadingEmptyClusterState(t *testing.T) {
 		t.Errorf("Got error getting cluster state: %s", err)
 	}
 	actualState := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon:   nil,
 				Proxy:    nil,
@@ -395,7 +395,7 @@ func TestReadingEmptyClusterState(t *testing.T) {
 func TestDiffStates(t *testing.T) {
 	// Test case 1: States are identical, no actions should be returned
 	desiredState := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon:   nil,
 				Proxy:    nil,
@@ -405,7 +405,7 @@ func TestDiffStates(t *testing.T) {
 		},
 	}
 	currentState := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon:   nil,
 				Proxy:    nil,
@@ -426,7 +426,7 @@ func TestDiffStates(t *testing.T) {
 
 	// Test case 2: Missing Charon pod in current state, should create it
 	desiredWithCharon := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
@@ -467,7 +467,7 @@ func TestDiffStates(t *testing.T) {
 	// Test case 3: When a pod exists in current state but not in desired state, it should be deleted
 	// This test is designed for how DiffStates should work in the future
 	currentWithCharon := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon: &IpmanPod[CharonPodSpec]{
 					Meta: PodMeta{
@@ -487,7 +487,7 @@ func TestDiffStates(t *testing.T) {
 	}
 
 	emptyDesired := &ClusterState{
-		Nodes: []NodeState{
+		Groups: []GroupState{
 			{
 				Charon: nil,
 				Proxy:  nil,
@@ -623,11 +623,11 @@ func TestMultipleIPSecConnections(t *testing.T) {
 	}
 
 	// Verify there's one node with both connections' resources
-	if len(desiredState.Nodes) != 1 {
-		t.Errorf("Expected 1 node, got %d", len(desiredState.Nodes))
+	if len(desiredState.Groups) != 1 {
+		t.Errorf("Expected 1 node, got %d", len(desiredState.Groups))
 	}
 
-	node := desiredState.Nodes[0]
+	node := desiredState.Groups[0]
 
 	// Should have 1 Charon pod
 	if node.Charon == nil {
