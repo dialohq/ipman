@@ -42,6 +42,6 @@ spec:
                     type: string
             status:
               type: object
-              properties:
+              properties: {}
       subresources:
         status: {}
