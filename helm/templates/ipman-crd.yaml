@@ -30,7 +30,6 @@ spec:
                 - children
                 - localId
                 - name
-                - nodeName
                 - remoteAddr
                 - localAddr
                 - remoteId
@@ -91,8 +90,6 @@ spec:
                 localId:
                   type: string
                 name:
-                  type: string
-                nodeName:
                   type: string
                 remoteAddr:
                   type: string
