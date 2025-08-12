@@ -23,7 +23,6 @@ type IPSecConnectionStatus struct {
 	XfrmGatewayIPs map[string]string              `json:"xfrmGatewayIp"`
 	FreeIPs        map[string]map[string][]string `json:"freeIps"`
 	PendingIPs     map[string]string              `json:"pendingIps"`
-	CharonProxyIP  string                         `json:"charonProxyIp"`
 }
 
 // IPSecConnection is the Kubernetes resource for configuring an IPSec connection.

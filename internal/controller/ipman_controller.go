@@ -647,7 +647,6 @@ func (r *IPSecConnectionReconciler) updateIPSecConnectionStatus(conn *ipmanv1.IP
 				}
 				return nil, fmt.Errorf("Couldn't get charon pod: %w", err)
 			}
-			conn.Status.CharonProxyIP = charonPod.Status.PodIP
 		}
 	}
 	return requeueIn, nil

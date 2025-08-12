@@ -149,10 +149,6 @@ func (wh *MutatingWebhookHandler) ServeHTTP(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if ipsecconnection.Status.CharonProxyIP == "" {
-		writeResponseDenied(w, in, "Charon proxy is not yet ready")
-	}
-
 	_, ok = ipsecconnection.Status.XfrmGatewayIPs[ipsecconnectionChild.Name]
 	if !ok {
 		writeResponseDenied(w, in, "XfrmPod for that child is not ready yet")

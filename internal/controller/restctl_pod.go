@@ -90,41 +90,8 @@ func (s ProxyPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Po
 	if err != nil {
 		return err
 	}
-
-	byGroup := groupConnsByGroup(list.Items)
-	conns, ok := byGroup[groupNsn]
-	if !ok {
-		return fmt.Errorf("Group '%s' not found", groupNsn)
-	}
-	for _, c := range conns {
-		if c.Spec.Group.Nsn().Name == groupNsn.Name && c.Spec.Group.Nsn().Namespace == groupNsn.Namespace {
-			c.Status.CharonProxyIP = pod.Status.PodIP
-			err = r.Status().Update(ctx, &c)
-			if err != nil {
-				return fmt.Errorf("Couldn't add proxy pod ip to status")
-			}
-		}
-	}
 	return nil
 }
 func (s ProxyPodSpec) CompleteDeletion(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
-	ctx := context.Background()
-	list := ipmanv1.IPSecConnectionList{}
-	err := r.List(ctx, &list)
-	if err != nil {
-		return fmt.Errorf("Couldn't fetch list of connections to complete deletion")
-	}
-	byGroup := groupConnsByGroup(list.Items)
-	conns, ok := byGroup[groupNsn]
-	if !ok {
-		return fmt.Errorf("Node '%s' not found", groupNsn)
-	}
-	for _, c := range conns {
-		c.Status.CharonProxyIP = ""
-		err := r.Status().Update(ctx, &c)
-		if err != nil {
-			return fmt.Errorf("Couldn't remove charon proxy ip from status: %w", err)
-		}
-	}
 	return nil
 }

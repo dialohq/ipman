@@ -162,7 +162,7 @@ func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod
 	}
 
 	if resp.StatusCode != 200 {
-		return fmt.Errorf("Couldn't create vxlan interface for pod '%s' PID: Status code not 200, is %d (IP: %s)", pod.Name, resp.StatusCode, isc.Status.CharonProxyIP)
+		return fmt.Errorf("Couldn't create vxlan interface for pod '%s' PID: Status code not 200, is %d", pod.Name, resp.StatusCode)
 	}
 
 	if isc.Status.XfrmGatewayIPs == nil {
