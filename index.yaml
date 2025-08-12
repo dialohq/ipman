@@ -10,6 +10,48 @@ entries:
             description: Defines the connection to a remote site
         artifacthub.io/images: |
           - name: xfrminion
+            image: plan9better/xfrminion:0.1.15
+            platforms:
+              - linux/amd64
+          - name: vxlandlord
+            image: plan9better/vxlandlord:0.1.15
+            platforms:
+              - linux/amd64
+          - name: operator
+            image: plan9better/operator:0.1.15
+            platforms:
+              - linux/amd64
+          - name: restctl
+            image: plan9better/restctl:0.1.15
+            platforms:
+              - linux/amd64
+          - name: charon
+            image: plan9better/charon:0.1.15
+            platforms:
+              - linux/amd64
+        artifacthub.io/license: MIT
+        artifacthub.io/recommendations: |
+          - https://artifacthub.io/packages/helm/cert-manager/cert-manager
+          - https://artifacthub.io/packages/helm/prometheus-community/kube-prometheus-stack
+      apiVersion: v2
+      appVersion: 1.16.0
+      created: "2025-08-12T14:13:38.975615+02:00"
+      description: IPSec connection manager
+      digest: cdfc7fe70b33cca99ff7dc2945c4eab6bd19c92e64cc78bdd4d50cb80b9edcf2
+      name: ipman
+      type: application
+      urls:
+        - https://github.com/dialohq/ipman/releases/download/0.1.15/ipman-0.1.15.tgz
+      version: 0.1.15
+    - annotations:
+        artifacthub.io/category: networking
+        artifacthub.io/crds: |
+          - kind: IPSecConnection
+            version: v1
+            name: ipsecconnection
+            description: Defines the connection to a remote site
+        artifacthub.io/images: |
+          - name: xfrminion
             image: plan9better/xfrminion:0.1.14
             platforms:
               - linux/amd64
@@ -199,4 +241,4 @@ entries:
       urls:
         - https://github.com/dialohq/ipman/releases/download/v0.1.8/ipman-0.1.8.tgz
       version: 0.1.8
-generated: "2025-08-11T17:20:35.386085+02:00"
+generated: "2025-08-12T14:13:38.974321+02:00"

@@ -24,7 +24,6 @@ spec:
               type: string
             metadata:
               type: object
-              properties: {}
             spec:
               type: object
               required:
@@ -43,6 +42,5 @@ spec:
                     type: string
             status:
               type: object
-              properties: {}
       subresources:
         status: {}
