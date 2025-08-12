@@ -41,7 +41,7 @@ entries:
       name: ipman
       type: application
       urls:
-        - https://github.com/dialohq/ipman/releases/download/0.1.15/ipman-0.1.15.tgz
+        - https://github.com/dialohq/ipman/releases/download/v0.1.15/ipman-0.1.15.tgz
       version: 0.1.15
     - annotations:
         artifacthub.io/category: networking
