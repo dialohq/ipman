@@ -277,6 +277,30 @@ func swanctl(args ...string) (string, error) {
 	return string(out), err
 }
 
+func getConfigs(w http.ResponseWriter, r *http.Request) {
+	conns, err := swanctlListConns()
+	if err != nil {
+		json.NewEncoder(w).Encode(comms.ConfigRequest{
+			Error: err,
+		})
+		return
+	}
+
+	sas, err := swanctlListSas()
+	if err != nil {
+		json.NewEncoder(w).Encode(comms.ConfigRequest{
+			Error: err,
+		})
+		return
+	}
+	v := NewReconcileVisitor(conns, sas)
+
+	json.NewEncoder(w).Encode(comms.ConfigRequest{
+		Conns: slices.Collect(maps.Keys(v.SasConnections)),
+		Error: nil,
+	})
+}
+
 func reloadConfig(w http.ResponseWriter, r *http.Request) {
 	h := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(h)
@@ -469,28 +493,47 @@ func reconcileIPSec(conns, sas *swanparse.SwanAST) error {
 	return nil
 }
 
-func tryInit(logger *slog.Logger) {
+func swanctlListConns() (*swanparse.SwanAST, error) {
 	// Get the list of connections
 	o, err := swanctl("--list-conns", "--raw")
 	if err != nil {
-		logger.Error("Error listing swanctl connections", "err", err)
-		return
-	}
-	connsAST, err := swanparse.Parse(o)
-	if err != nil {
-		logger.Error("Error parsing swanctl connections", "err", err)
-		return
+		return nil, fmt.Errorf("Error listing swanctl connections: %w", err)
 	}
 
-	// Get the list of security associations
-	o, err = swanctl("--list-sas", "--raw")
+	// TODO: github:TDT-AG/swanmon is a cli tool to output this info
+	// in json format, we wouldn't need to do all that if we used it.
+	// maybe contrib a way to make it a library instead of a cli tool
+	connsAST, err := swanparse.Parse(o)
 	if err != nil {
-		logger.Error("Error listing security associations", "err", err)
-		return
+		return nil, fmt.Errorf("Error parsing swanctl connections: %w", err)
+	}
+	return connsAST, nil
+}
+
+func swanctlListSas() (*swanparse.SwanAST, error) {
+	// Get the list of security associations
+	o, err := swanctl("--list-sas", "--raw")
+	if err != nil {
+
+		return nil, fmt.Errorf("Error listing security associations: %w", err)
 	}
 	sasAST, err := swanparse.Parse(o)
 	if err != nil {
-		logger.Error("Error parsing security associations", "err", err)
+		return nil, fmt.Errorf("Error parsing security associations: %w", err)
+	}
+	return sasAST, nil
+}
+
+func tryInit(logger *slog.Logger) {
+	connsAST, err := swanctlListConns()
+	if err != nil {
+		logger.Error("error trying to initiate connection reconciliation", "msg", err.Error())
+		return
+	}
+
+	sasAST, err := swanctlListSas()
+	if err != nil {
+		logger.Error("error trying to initiate connection reconciliation", "msg", err.Error())
 		return
 	}
 
@@ -600,6 +643,7 @@ func main() {
 	}))
 	mux.HandleFunc("/p1ng", p0ng)
 	mux.HandleFunc("/reload", reloadConfig)
+	mux.HandleFunc("/configs", getConfigs)
 
 	server := http.Server{
 		Handler: mux,

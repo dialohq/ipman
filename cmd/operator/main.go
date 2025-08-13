@@ -1,9 +1,12 @@
 package main
 
 import (
+	"net/http"
 	"os"
 	"strconv"
 
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -11,6 +14,7 @@ import (
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
+	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
@@ -25,10 +29,25 @@ var (
 	scheme = runtime.NewScheme()
 )
 
+var (
+	connectionsStatus = prometheus.NewGaugeVec(prometheus.GaugeOpts{
+		Namespace: "strongswan",
+		Name:      "connections_status",
+		Help:      "Returns all existing connections, value of 0 means the connection is not loaded into the charon daemon, value of 1 means it is",
+	}, []string{"connection"})
+	failedConnectionLoadCnt = prometheus.NewCounter(prometheus.CounterOpts{
+		Namespace: "strongswan",
+		Name:      "failed_connection_load_cnt",
+		Help:      "The total number of times a connection was not loaded",
+	})
+)
+
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(ipmanv1.AddToScheme(scheme))
 	utilruntime.Must(promv1.AddToScheme(scheme))
+	prometheus.MustRegister(connectionsStatus)
+	prometheus.MustRegister(failedConnectionLoadCnt)
 }
 
 func main() {
@@ -36,6 +55,10 @@ func main() {
 
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), manager.Options{
 		Scheme: scheme,
+		Metrics: server.Options{
+			BindAddress: ":8080",
+			CertDir:     ipmanv1.WebhookServerCertDir,
+		},
 	})
 	if err != nil {
 		log.Error(err, "Creating manager failed")
@@ -85,11 +108,17 @@ func main() {
 	}
 
 	log.Info("Creating controller")
-	if err = (&cont.IPSecConnectionReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-		Env:    e,
-	}).SetupWithManager(mgr); err != nil {
+	rec := &cont.IPSecConnectionReconciler{
+		Client:                  mgr.GetClient(),
+		Scheme:                  mgr.GetScheme(),
+		Env:                     e,
+		NotLoadedConns:          []string{},
+		AllConns:                []string{},
+		ConnectionsStatusMetric: connectionsStatus,
+		NotLoadedMetric:         failedConnectionLoadCnt,
+	}
+
+	if err = rec.SetupWithManager(mgr); err != nil {
 		log.Error(err, "Creating controller failed")
 		os.Exit(1)
 	}
@@ -117,6 +146,9 @@ func main() {
 	}
 	whServer.Register("/mutating", &mwh)
 	whServer.Register("/validating", &vwh)
+
+	http.Handle("/metrics", promhttp.Handler())
+	go http.ListenAndServe(":61410", nil)
 
 	if err := mgr.Start(ctrl.SetupSignalHandler()); err != nil {
 		log.Error(err, "problem running manager")

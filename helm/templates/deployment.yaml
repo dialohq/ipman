@@ -35,6 +35,9 @@ spec:
           {{- end }}
           image: {{ .Values.controller.image }}
           imagePullPolicy: {{ .Values.controller.pullPolicy }}
+          ports:
+            - containerPort: 61410
+              name: metrics
           env:
             - name: NAMESPACE_NAME
               value: {{ .Values.global.namespace }}

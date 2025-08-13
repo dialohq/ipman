@@ -11,8 +11,7 @@ import (
 
 // RestctlPodSpec defines the specification for a Restctl pod
 type RestctlPodSpec struct {
-	HostPath string                        `json:"host_path" diff:"host_path"`
-	Configs  []ipmanv1.IPSecConnectionSpec `json:"configs" diff:"configs"`
+	HostPath string `json:"host_path" diff:"host_path"`
 }
 
 // ApplySpec implements the IpmanPodSpec interface for RestctlPodSpec

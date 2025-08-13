@@ -62,7 +62,8 @@ const (
 	CharonProxyPodSuffix        = "proxy"
 	RestctlPort                 = 61410
 	RestctlPortName             = "api"
-	PodMonitorName              = "ipman-ipsec-exporter"
+	PodMonitorRestctlName       = "ipman-ipsec-exporter-restctl"
+	PodMonitorManagerName       = "ipman-ipsec-exporter-manager"
 	CharonAPIProxyContainerName = "restctl"
 	CharonDaemonContainerName   = "charon-daemon"
 	RestctlContainerName        = "restctl"

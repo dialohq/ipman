@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"fmt"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 )
@@ -16,8 +18,28 @@ type CharonGroup struct {
 	Status CharonGroupStatus `json:"status,omitempty"`
 }
 
+func SameNsn[A, B HasNsn](a A, b B) bool {
+	return a.Nsn() == b.Nsn()
+}
+
+func String[T HasNsn](t T) string {
+	return t.Nsn().String()
+}
+
+type HasNsn interface {
+	Nsn() types.NamespacedName
+}
+
 func (g *CharonGroup) Nsn() types.NamespacedName {
 	return types.NamespacedName{Name: g.Name, Namespace: g.Namespace}
+}
+
+func (g *CharonGroup) String() string {
+	return fmt.Sprintf("%s-%s", g.Name, g.Namespace)
+}
+
+func (g *CharonGroup) Equals(other HasNsn) bool {
+	return SameNsn(g, other)
 }
 
 // +k8s:deepcopy-gen=true
@@ -35,6 +57,14 @@ type CharonGroupRef struct {
 
 func (gr *CharonGroupRef) Nsn() types.NamespacedName {
 	return types.NamespacedName{Name: gr.Name, Namespace: gr.Namespace}
+}
+
+func (gr *CharonGroupRef) Equals(other HasNsn) bool {
+	return SameNsn(other, gr)
+}
+
+func (gr *CharonGroupRef) String() string {
+	return String(gr)
 }
 
 type CharonGroupStatus struct {

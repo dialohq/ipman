@@ -68,5 +68,10 @@ func Parse(input string) (*SwanAST, error) {
 	if err != nil {
 		return nil, err
 	}
-	return parser.ParseString("SwanAST", input)
+	ast, err := parser.ParseString("SwanAST", input)
+	if err != nil {
+		fmt.Printf("Error parsing string, error: %s\nstring: %s\n", err.Error(), input)
+		return nil, err
+	}
+	return ast, nil
 }

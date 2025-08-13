@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"maps"
+	"net/http"
 
 	"reflect"
 	"slices"
@@ -13,8 +15,9 @@ import (
 	"time"
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
-	u "dialo.ai/ipman/pkg/utils"
+	"dialo.ai/ipman/pkg/comms"
 	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
+	"github.com/prometheus/client_golang/prometheus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
@@ -59,8 +62,12 @@ type Envs struct {
 // IPSecConnectionReconciler reconciles IPSecConnection resources
 type IPSecConnectionReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
-	Env    Envs
+	Scheme                  *runtime.Scheme
+	Env                     Envs
+	NotLoadedConns          []string
+	AllConns                []string
+	ConnectionsStatusMetric *prometheus.GaugeVec
+	NotLoadedMetric         prometheus.Counter
 }
 
 // RequestError represents an error that occurred during a Kubernetes API request
@@ -191,26 +198,11 @@ func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
 	}
 }
 
-// ProxyFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
-func ProxyFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
-	cs := RestctlPodSpec{}
-	err := json.Unmarshal([]byte(p.Annotations[ipmanv1.AnnotationSpec]), &cs)
-	if err != nil {
-		logger := log.FromContext(context.Background())
-		e := &InternalError{
-			Location: "ProxyFromPod",
-			Action:   "Unmarshaling spec annotation",
-			Err:      err,
-			Environment: map[string]any{
-				"Pod": *p,
-			},
-		}
-		logger.Error(e, "Couldn't unmarshal spec annotation of proxy pod")
-	}
+// RestctlFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
+func RestctlFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
 	return IpmanPod[RestctlPodSpec]{
 		Spec: RestctlPodSpec{
 			HostPath: ExtractCharonVolumeSocketPath(p),
-			Configs:  cs.Configs,
 		},
 		Group: ipmanv1.CharonGroupRef{
 			Name:      p.Labels[ipmanv1.LabelGroupName],
@@ -354,7 +346,7 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 	}
 
 	pm := &promv1.PodMonitor{}
-	err = r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: ipmanv1.PodMonitorName}, pm)
+	err = r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: ipmanv1.PodMonitorRestctlName}, pm)
 	if err != nil {
 		if !apierrors.IsNotFound(err) {
 			return nil, &RequestError{"Get", "PodMonitor", err}
@@ -368,7 +360,7 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 		return nil, err
 	}
 
-	proxies, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueRestctlPod, ProxyFromPod)
+	proxies, err := GetClusterPodsAs(ctx, r, ipmanv1.LabelValueRestctlPod, RestctlFromPod)
 	if err != nil {
 		return nil, err
 	}
@@ -493,23 +485,7 @@ func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection,
 			fullPath += "/" + path
 		}
 
-		configs := []ipmanv1.IPSecConnection{}
-		for _, c := range cl {
-			gnsn := c.Spec.Group.Nsn()
-			if gnsn.Name == nsn.Name && gnsn.Namespace == nsn.Namespace {
-				configs = append(configs, c)
-			}
-		}
-
-		if len(configs) == 0 {
-			continue
-		}
 		rctl := IpmanPod[RestctlPodSpec]{}
-
-		specs := u.MapF(func(v ipmanv1.IPSecConnection) ipmanv1.IPSecConnectionSpec {
-			return v.Spec
-		}, configs)
-
 		rctl.Meta = PodMeta{
 			NodeName:  group.Spec.NodeName,
 			Name:      strings.Join([]string{ipmanv1.RestctlPodName, nsn.Namespace, nsn.Name}, "-"),
@@ -519,7 +495,6 @@ func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection,
 		rctl.Group = ipmanv1.CharonGroupRef{Name: nsn.Name, Namespace: nsn.Namespace}
 		rctl.Spec = RestctlPodSpec{
 			HostPath: fullPath,
-			Configs:  specs,
 		}
 		rctls = append(rctls, rctl)
 	}
@@ -836,7 +811,7 @@ func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[RestctlPodSpec],
 
 	connsPerGroup := []ipmanv1.IPSecConnection{}
 	for _, c := range conns {
-		if c.Spec.Group.Name == desired.Group.Name && c.Spec.Group.Namespace == desired.Group.Namespace {
+		if desired.Group.Equals(&c.Spec.Group) {
 			connsPerGroup = append(connsPerGroup, c)
 		}
 	}
@@ -848,17 +823,97 @@ func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[RestctlPodSpec],
 	if !sameMeta {
 		return []Action{&DeletePodAction[RestctlPodSpec]{Pod: current}, &CreatePodAction[RestctlPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerGroup}}, nil
 	}
-	slices.SortFunc(desired.Spec.Configs, func(a, b ipmanv1.IPSecConnectionSpec) int {
-		return strings.Compare(a.Name, b.Name)
-	})
-	slices.SortFunc(current.Spec.Configs, func(a, b ipmanv1.IPSecConnectionSpec) int {
-		return strings.Compare(a.Name, b.Name)
-	})
 
-	if !reflect.DeepEqual(desired.Spec.Configs, current.Spec.Configs) {
-		return []Action{&OverrideConfigAction{PodName: current.Meta.Name, Configs: connsPerGroup}}, nil
+	url := fmt.Sprintf("http://%s:61410/configs", current.Meta.IP)
+	resp, err := http.Get(url)
+	if err != nil {
+		return nil, err
 	}
+	if resp.StatusCode != 200 {
+		return nil, fmt.Errorf("When diffing restctls, response is not 200, is %d", resp.StatusCode)
+	}
+	out, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("Error reading body of response from restctl when diffing: %w", err)
+	}
+	info := comms.ConfigRequest{}
+	err = json.Unmarshal(out, &info)
+	if err != nil {
+		return nil, err
+	}
+
+	r.updateMetric()
+
+	for _, c := range conns {
+		if !slices.Contains(r.AllConns, c.Name) {
+			r.AllConns = append(r.AllConns, c.Name)
+		}
+	}
+
+	for _, n := range r.AllConns {
+		if !slices.ContainsFunc(conns, func(i ipmanv1.IPSecConnection) bool {
+			return i.Name == n
+		}) {
+			slices.DeleteFunc(r.AllConns, func(s string) bool {
+				return s == n
+			})
+		}
+	}
+	newAllConnsList := []string{}
+	for _, n := range r.AllConns {
+		if n != "" {
+			newAllConnsList = append(newAllConnsList, n)
+		}
+	}
+	r.AllConns = newAllConnsList
+
+	// check if any are missing
+	allLoaded := true
+	for _, c := range connsPerGroup {
+		if !slices.Contains(info.Conns, c.Name) {
+			if !slices.Contains(r.NotLoadedConns, c.Name) {
+				r.NotLoadedConns = append(r.NotLoadedConns, c.Name)
+				allLoaded = false
+			}
+		} else {
+			slices.DeleteFunc(r.NotLoadedConns, func(name string) bool {
+				return name == c.Name
+			})
+		}
+	}
+	if !allLoaded {
+		return []Action{&OverrideConfigAction{Configs: connsPerGroup, PodName: current.Meta.Name}}, nil
+	}
+
+	for _, loadedConnName := range info.Conns {
+		if !slices.ContainsFunc(connsPerGroup, func(c ipmanv1.IPSecConnection) bool {
+			return c.Name == loadedConnName
+		}) {
+			return []Action{&OverrideConfigAction{Configs: connsPerGroup, PodName: current.Meta.Name}}, nil
+		}
+	}
+
+	newList := []string{}
+	for _, n := range r.NotLoadedConns {
+		if n != "" {
+			newList = append(newList, n)
+		}
+	}
+	r.NotLoadedConns = newList
+
 	return []Action{}, nil
+}
+
+func (r *IPSecConnectionReconciler) updateMetric() {
+	for _, name := range r.AllConns {
+		isUp := !slices.Contains(r.NotLoadedConns, name)
+		value := 1.0
+		if !isUp {
+			value = 0.0
+			r.NotLoadedMetric.Add(1)
+		}
+		r.ConnectionsStatusMetric.WithLabelValues(name).Set(value)
+	}
 }
 
 func diffCharon(desired *IpmanPod[CharonPodSpec], current *IpmanPod[CharonPodSpec]) []Action {
@@ -1226,7 +1281,7 @@ func (r *IPSecConnectionReconciler) DiffStates(desired *ClusterState, current *C
 
 func res(rq *time.Duration, times ...time.Duration) ctrl.Result {
 	if rq == nil && times == nil {
-		return ctrl.Result{}
+		return ctrl.Result{RequeueAfter: time.Minute}
 	}
 	if rq == nil {
 		return ctrl.Result{RequeueAfter: slices.Min(times)}
@@ -1341,6 +1396,11 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 			logger.Info("Error executing action", "action", a, "msg", err)
 			return ctrl.Result{}, err
 		}
+	}
+
+	if n := len(r.NotLoadedConns); n != 0 {
+		logger.Info("Some connections not loaded, requing in 3s", "amount", n, "connections", r.NotLoadedConns)
+		return res(rq, time.Second*3), nil
 	}
 
 	return res(rq), nil

@@ -11,6 +11,7 @@ import (
 
 	ipmanv1 "dialo.ai/ipman/api/v1"
 	"dialo.ai/ipman/pkg/comms"
+	u "dialo.ai/ipman/pkg/utils"
 	promv1 "github.com/prometheus-operator/prometheus-operator/pkg/apis/monitoring/v1"
 	"github.com/r3labs/diff/v3"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -29,7 +30,7 @@ type DeleteMonitorAction struct{}
 func (a *DeleteMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
 	pm := promv1.PodMonitor{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ipmanv1.PodMonitorName,
+			Name:      ipmanv1.PodMonitorRestctlName,
 			Namespace: r.Env.NamespaceName,
 		},
 	}
@@ -53,7 +54,7 @@ func (a *CreateMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconcil
 
 	r.Create(ctx, &promv1.PodMonitor{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      ipmanv1.PodMonitorName,
+			Name:      ipmanv1.PodMonitorRestctlName,
 			Namespace: r.Env.NamespaceName,
 			Labels: map[string]string{
 				"release": r.Env.MonitoringReleaseName,
@@ -67,6 +68,28 @@ func (a *CreateMonitorAction) Do(ctx context.Context, r *IPSecConnectionReconcil
 				{
 					Port:       &prtName,
 					PortNumber: &prtNum,
+					Path:       "/metrics",
+					Interval:   promv1.Duration(r.Env.MonitoringScrapeInterval),
+				},
+			},
+		},
+	})
+	r.Create(ctx, &promv1.PodMonitor{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      ipmanv1.PodMonitorManagerName,
+			Namespace: r.Env.NamespaceName,
+			Labels: map[string]string{
+				"release": r.Env.MonitoringReleaseName,
+			},
+		},
+		Spec: promv1.PodMonitorSpec{
+			Selector: metav1.LabelSelector{MatchLabels: map[string]string{
+				"app.kubernetes.io/name": "ipman",
+			}},
+			PodMetricsEndpoints: []promv1.PodMetricsEndpoint{
+				{
+					Port:       u.Ptr("metrics"),
+					PortNumber: u.Ptr(int32(61410)),
 					Path:       "/metrics",
 					Interval:   promv1.Duration(r.Env.MonitoringScrapeInterval),
 				},
@@ -360,6 +383,8 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	if err != nil {
 		return fmt.Errorf("Couldn't get pod %s: %w", a.PodName, err)
 	}
+	ImPod := RestctlFromPod(&pod)
+
 	if r.Env.IsTest {
 		return fmt.Errorf("Couldn't send ping request to proxy pod")
 	}
@@ -402,7 +427,7 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 		if err != nil {
 			return err
 		}
-		if group.Spec.NodeName == pod.Spec.NodeName {
+		if group.Equals(&ImPod.Group) {
 			sec := &corev1.Secret{}
 			err := r.Get(context.Background(), types.NamespacedName{Name: conn.Spec.SecretRef.Name, Namespace: conn.Spec.SecretRef.Namespace}, sec)
 			if err != nil {
@@ -446,27 +471,6 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	}
 	if resp.StatusCode != 200 {
 		return rd
-	}
-	spec := RestctlPodSpec{}
-	err = json.Unmarshal([]byte(pod.Annotations[ipmanv1.AnnotationSpec]), &spec)
-	if err != nil {
-		return fmt.Errorf("Couldn't unmarshal spec: %w", err)
-	}
-	connSpecs := []ipmanv1.IPSecConnectionSpec{}
-	for _, s := range a.Configs {
-		if !slices.Contains(rd.FailedConns, s.Spec.Name) {
-			connSpecs = append(connSpecs, s.Spec)
-		}
-	}
-	spec.Configs = connSpecs
-	out, err = json.Marshal(spec)
-	if err != nil {
-		return fmt.Errorf("Coulnd't marshal spec")
-	}
-	pod.Annotations[ipmanv1.AnnotationSpec] = string(out)
-	err = r.Update(ctx, &pod)
-	if err != nil {
-		return fmt.Errorf("Couldn't update annotations of pod %s: %w", pod.Name, err)
 	}
 	return nil
 }

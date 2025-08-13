@@ -107,3 +107,8 @@ type SetupVxlanRequest struct {
 	XfrmID  int    `json:"xfrm_id"`
 	VxlanIP string `json:"vxlan_ip"`
 }
+
+type ConfigRequest struct {
+	Conns []string `json:"conns"`
+	Error error    `json:"error"`
+}
