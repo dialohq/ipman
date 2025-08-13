@@ -46,14 +46,14 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					HostPath: "/test/path",
 				},
 			},
-			Proxy: &IpmanPod[ProxyPodSpec]{
+			Proxy: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "test-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{
+				Spec: RestctlPodSpec{
 					HostPath: "/test/path",
 				},
 			},
@@ -125,7 +125,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					if _, ok := action.(*CreatePodAction[CharonPodSpec]); ok {
 						continue
 					}
-					if _, ok := action.(*CreatePodAction[ProxyPodSpec]); ok {
+					if _, ok := action.(*CreatePodAction[RestctlPodSpec]); ok {
 						continue
 					}
 					if _, ok := action.(*CreatePodAction[XfrmPodSpec]); ok {
@@ -159,7 +159,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 					if _, ok := action.(*DeletePodAction[CharonPodSpec]); ok {
 						continue
 					}
-					if _, ok := action.(*DeletePodAction[ProxyPodSpec]); ok {
+					if _, ok := action.(*DeletePodAction[RestctlPodSpec]); ok {
 						continue
 					}
 					if _, ok := action.(*DeletePodAction[XfrmPodSpec]); ok {
@@ -247,7 +247,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 
 				for _, action := range actions {
 					switch action.(type) {
-					case *DeletePodAction[CharonPodSpec], *DeletePodAction[ProxyPodSpec], *DeletePodAction[XfrmPodSpec]:
+					case *DeletePodAction[CharonPodSpec], *DeletePodAction[RestctlPodSpec], *DeletePodAction[XfrmPodSpec]:
 						deleteCount++
 						// Check that the node is the old one
 						switch typedAction := action.(type) {
@@ -255,7 +255,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 							if typedAction.Pod.Meta.NodeName != "test-node" {
 								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
-						case *DeletePodAction[ProxyPodSpec]:
+						case *DeletePodAction[RestctlPodSpec]:
 							if typedAction.Pod.Meta.NodeName != "test-node" {
 								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
@@ -264,7 +264,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 								t.Errorf("Expected deleted pod node to be 'test-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
 						}
-					case *CreatePodAction[CharonPodSpec], *CreatePodAction[ProxyPodSpec], *CreatePodAction[XfrmPodSpec]:
+					case *CreatePodAction[CharonPodSpec], *CreatePodAction[RestctlPodSpec], *CreatePodAction[XfrmPodSpec]:
 						createCount++
 						// Check that the node is the new one
 						switch typedAction := action.(type) {
@@ -272,7 +272,7 @@ func TestDiffStatesComprehensive(t *testing.T) {
 							if typedAction.Pod.Meta.NodeName != "new-node" {
 								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
-						case *CreatePodAction[ProxyPodSpec]:
+						case *CreatePodAction[RestctlPodSpec]:
 							if typedAction.Pod.Meta.NodeName != "new-node" {
 								t.Errorf("Expected created pod node to be 'new-node', got '%s'", typedAction.Pod.Meta.NodeName)
 							}
@@ -371,14 +371,14 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 				HostPath: "/node2/path",
 			},
 		},
-		Proxy: &IpmanPod[ProxyPodSpec]{
+		Proxy: &IpmanPod[RestctlPodSpec]{
 			Meta: PodMeta{
 				Name:      "restctl-pod-node2",
 				Namespace: "ipman-system",
 				NodeName:  "node2",
 				Image:     "proxy-image",
 			},
-			Spec: ProxyPodSpec{},
+			Spec: RestctlPodSpec{},
 		},
 		Xfrms: []IpmanPod[XfrmPodSpec]{
 			{
@@ -419,14 +419,14 @@ func TestDiffStatesWithMultipleNodes(t *testing.T) {
 	node_with_pods1 := GroupState{}
 	_ = json.Unmarshal(out, &node_with_pods1)
 	fmt.Println(string(out))
-	node_with_pods1.Proxy = &IpmanPod[ProxyPodSpec]{
+	node_with_pods1.Proxy = &IpmanPod[RestctlPodSpec]{
 		Meta: PodMeta{
 			Name:      "restctl-pod-node1",
 			Namespace: "ipman-system",
 			NodeName:  "node1",
 			Image:     "proxy-image",
 		},
-		Spec: ProxyPodSpec{},
+		Spec: RestctlPodSpec{},
 	}
 
 	out, _ = json.Marshal(node2)

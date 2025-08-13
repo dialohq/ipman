@@ -188,7 +188,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						HostPath: "/var/run/ipman",
 					},
 				},
-				Proxy: &IpmanPod[ProxyPodSpec]{
+				Proxy: &IpmanPod[RestctlPodSpec]{
 					Meta: PodMeta{
 						Name:      "restctl-pod-aaabbbcccdddeeefff",
 						Namespace: "ipman-system",
@@ -196,7 +196,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						NodeID:    "aaabbbcccdddeeefff",
 						Image:     "caddy:2.10.0-alpine",
 					},
-					Spec: ProxyPodSpec{
+					Spec: RestctlPodSpec{
 						HostPath: "/var/run/ipman",
 						Configs:  []ipmanv1.IPSecConnectionSpec{c.Spec},
 					},
@@ -265,7 +265,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						HostPath: "/var/run/ipman",
 					},
 				},
-				Proxy: &IpmanPod[ProxyPodSpec]{
+				Proxy: &IpmanPod[RestctlPodSpec]{
 					Meta: PodMeta{
 						Name:      "restctl-pod-fffeeedddcccbbbaaa",
 						Namespace: "ipman-system",
@@ -273,7 +273,7 @@ func TestCreatingDesiredState(t *testing.T) {
 						NodeName:  "localcluster2",
 						Image:     "caddy:2.10.0-alpine",
 					},
-					Spec: ProxyPodSpec{
+					Spec: RestctlPodSpec{
 						HostPath: "/var/run/ipman",
 						Configs:  []ipmanv1.IPSecConnectionSpec{c2.Spec},
 					},

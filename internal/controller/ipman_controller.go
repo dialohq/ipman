@@ -192,8 +192,8 @@ func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
 }
 
 // ProxyFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
-func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
-	cs := ProxyPodSpec{}
+func ProxyFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
+	cs := RestctlPodSpec{}
 	err := json.Unmarshal([]byte(p.Annotations[ipmanv1.AnnotationSpec]), &cs)
 	if err != nil {
 		logger := log.FromContext(context.Background())
@@ -207,8 +207,8 @@ func ProxyFromPod(p *corev1.Pod) IpmanPod[ProxyPodSpec] {
 		}
 		logger.Error(e, "Couldn't unmarshal spec annotation of proxy pod")
 	}
-	return IpmanPod[ProxyPodSpec]{
-		Spec: ProxyPodSpec{
+	return IpmanPod[RestctlPodSpec]{
+		Spec: RestctlPodSpec{
 			HostPath: ExtractCharonVolumeSocketPath(p),
 			Configs:  cs.Configs,
 		},
@@ -482,8 +482,8 @@ func (r *IPSecConnectionReconciler) CreateCharons(groups map[types.NamespacedNam
 }
 
 // CreateRestctls creates Proxy pod specifications for the given IPSecConnections
-func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection, groups map[types.NamespacedName]ipmanv1.CharonGroup) []IpmanPod[ProxyPodSpec] {
-	rctls := []IpmanPod[ProxyPodSpec]{}
+func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection, groups map[types.NamespacedName]ipmanv1.CharonGroup) []IpmanPod[RestctlPodSpec] {
+	rctls := []IpmanPod[RestctlPodSpec]{}
 	for nsn, group := range groups {
 		path := strings.Join([]string{group.Name, group.Namespace}, "/")
 		fullPath := r.Env.HostSocketsPath
@@ -504,7 +504,7 @@ func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection,
 		if len(configs) == 0 {
 			continue
 		}
-		rctl := IpmanPod[ProxyPodSpec]{}
+		rctl := IpmanPod[RestctlPodSpec]{}
 
 		specs := u.MapF(func(v ipmanv1.IPSecConnection) ipmanv1.IPSecConnectionSpec {
 			return v.Spec
@@ -517,7 +517,7 @@ func (r *IPSecConnectionReconciler) CreateRestctls(cl []ipmanv1.IPSecConnection,
 			Image:     r.Env.CaddyImage,
 		}
 		rctl.Group = ipmanv1.CharonGroupRef{Name: nsn.Name, Namespace: nsn.Namespace}
-		rctl.Spec = ProxyPodSpec{
+		rctl.Spec = RestctlPodSpec{
 			HostPath: fullPath,
 			Configs:  specs,
 		}
@@ -826,12 +826,12 @@ func diffImmutablePod[Spec IpmanPodSpec](desired *IpmanPod[Spec], current *Ipman
 	return []Action{}
 }
 
-func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[ProxyPodSpec], current *IpmanPod[ProxyPodSpec], conns []ipmanv1.IPSecConnection) ([]Action, error) {
+func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[RestctlPodSpec], current *IpmanPod[RestctlPodSpec], conns []ipmanv1.IPSecConnection) ([]Action, error) {
 	if desired == nil && current == nil {
 		return []Action{}, nil
 	}
 	if desired == nil {
-		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}}, nil
+		return []Action{&DeletePodAction[RestctlPodSpec]{Pod: current}}, nil
 	}
 
 	connsPerGroup := []ipmanv1.IPSecConnection{}
@@ -841,12 +841,12 @@ func (r *IPSecConnectionReconciler) diffProxy(desired *IpmanPod[ProxyPodSpec], c
 		}
 	}
 	if current == nil {
-		return []Action{&CreatePodAction[ProxyPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerGroup}}, nil
+		return []Action{&CreatePodAction[RestctlPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerGroup}}, nil
 	}
 
 	sameMeta := comparePods(desired, current)
 	if !sameMeta {
-		return []Action{&DeletePodAction[ProxyPodSpec]{Pod: current}, &CreatePodAction[ProxyPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerGroup}}, nil
+		return []Action{&DeletePodAction[RestctlPodSpec]{Pod: current}, &CreatePodAction[RestctlPodSpec]{Pod: desired}, &OverrideConfigAction{PodName: desired.Meta.Name, Configs: connsPerGroup}}, nil
 	}
 	slices.SortFunc(desired.Spec.Configs, func(a, b ipmanv1.IPSecConnectionSpec) int {
 		return strings.Compare(a.Name, b.Name)
@@ -1166,7 +1166,7 @@ func deleteNode(ns *GroupState) []Action {
 		acts = append(acts, &DeletePodAction[CharonPodSpec]{Pod: ns.Charon})
 	}
 	if ns.Proxy != nil {
-		acts = append(acts, &DeletePodAction[ProxyPodSpec]{Pod: ns.Proxy})
+		acts = append(acts, &DeletePodAction[RestctlPodSpec]{Pod: ns.Proxy})
 	}
 	for _, x := range ns.Xfrms {
 		acts = append(acts, &DeletePodAction[XfrmPodSpec]{Pod: &x})

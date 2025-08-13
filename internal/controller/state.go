@@ -18,7 +18,7 @@ type IpmanPodSpec interface {
 	ApplySpec(*corev1.Pod, Envs)
 	CompleteSetup(*IPSecConnectionReconciler, *corev1.Pod, types.NamespacedName) error
 	CompleteDeletion(*IPSecConnectionReconciler, *corev1.Pod, types.NamespacedName) error
-	CharonPodSpec | ProxyPodSpec | XfrmPodSpec
+	CharonPodSpec | RestctlPodSpec | XfrmPodSpec
 }
 
 // IpmanPod is a generic container for IPMan pod resources with their specifications
@@ -36,7 +36,7 @@ func (p *IpmanPod[Spec]) CreateK8sPodMeta() corev1.Pod {
 	switch any(p.Spec).(type) {
 	case CharonPodSpec:
 		typeLabel = ipmanv1.LabelValueCharonPod
-	case ProxyPodSpec:
+	case RestctlPodSpec:
 		typeLabel = ipmanv1.LabelValueRestctlPod
 	case XfrmPodSpec:
 		typeLabel = ipmanv1.LabelValueXfrmPod
@@ -96,9 +96,9 @@ type PodMeta struct {
 
 // GroupState represents the state of all IPMan pods on a specific node
 type GroupState struct {
-	Charon   *IpmanPod[CharonPodSpec] `json:"charon" diff:"charon"`
-	Proxy    *IpmanPod[ProxyPodSpec]  `json:"proxy" diff:"proxy"`
-	Xfrms    []IpmanPod[XfrmPodSpec]  `json:"xfrms" diff:"xfrms"`
+	Charon   *IpmanPod[CharonPodSpec]  `json:"charon" diff:"charon"`
+	Proxy    *IpmanPod[RestctlPodSpec] `json:"proxy" diff:"proxy"`
+	Xfrms    []IpmanPod[XfrmPodSpec]   `json:"xfrms" diff:"xfrms"`
 	GroupRef ipmanv1.CharonGroupRef
 }
 

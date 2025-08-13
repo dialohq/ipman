@@ -198,8 +198,8 @@ func TestDiffCharon(t *testing.T) {
 func TestDiffProxy(t *testing.T) {
 	tests := []struct {
 		name     string
-		desired  *IpmanPod[ProxyPodSpec]
-		current  *IpmanPod[ProxyPodSpec]
+		desired  *IpmanPod[RestctlPodSpec]
+		current  *IpmanPod[RestctlPodSpec]
 		expected int // Expected number of actions
 	}{
 		{
@@ -210,73 +210,73 @@ func TestDiffProxy(t *testing.T) {
 		},
 		{
 			name: "Identical pods",
-			desired: &IpmanPod[ProxyPodSpec]{
+			desired: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "test-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
-			current: &IpmanPod[ProxyPodSpec]{
+			current: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "test-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
 			expected: 0,
 		},
 		{
 			name:    "Desired pod missing (delete)",
 			desired: nil,
-			current: &IpmanPod[ProxyPodSpec]{
+			current: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "test-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
 			expected: 1, // Should generate a delete action
 		},
 		{
 			name: "Current pod missing (create)",
-			desired: &IpmanPod[ProxyPodSpec]{
+			desired: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "test-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
 			current:  nil,
 			expected: 2, // Should generate a create action
 		},
 		{
 			name: "Different node (recreate)",
-			desired: &IpmanPod[ProxyPodSpec]{
+			desired: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "new-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
-			current: &IpmanPod[ProxyPodSpec]{
+			current: &IpmanPod[RestctlPodSpec]{
 				Meta: PodMeta{
 					Name:      "restctl-pod-test",
 					Namespace: "ipman-system",
 					NodeName:  "old-node",
 					Image:     "test-image",
 				},
-				Spec: ProxyPodSpec{},
+				Spec: RestctlPodSpec{},
 			},
 			expected: 3, // Should generate delete and create actions
 		},
@@ -301,20 +301,20 @@ func TestDiffProxy(t *testing.T) {
 			if tt.expected > 0 {
 				if tt.desired == nil && tt.current != nil {
 					// Should be a delete action
-					if _, ok := actions[0].(*DeletePodAction[ProxyPodSpec]); !ok {
+					if _, ok := actions[0].(*DeletePodAction[RestctlPodSpec]); !ok {
 						t.Errorf("Expected DeletePodAction, got %T", actions[0])
 					}
 				} else if tt.desired != nil && tt.current == nil {
 					// Should be a create action
-					if _, ok := actions[0].(*CreatePodAction[ProxyPodSpec]); !ok {
+					if _, ok := actions[0].(*CreatePodAction[RestctlPodSpec]); !ok {
 						t.Errorf("Expected CreatePodAction, got %T", actions[0])
 					}
 				} else if tt.desired != nil && tt.current != nil && tt.expected == 2 {
 					// Should be delete then create
-					if _, ok := actions[0].(*DeletePodAction[ProxyPodSpec]); !ok {
+					if _, ok := actions[0].(*DeletePodAction[RestctlPodSpec]); !ok {
 						t.Errorf("Expected first action to be DeletePodAction, got %T", actions[0])
 					}
-					if _, ok := actions[1].(*CreatePodAction[ProxyPodSpec]); !ok {
+					if _, ok := actions[1].(*CreatePodAction[RestctlPodSpec]); !ok {
 						t.Errorf("Expected second action to be CreatePodAction, got %T", actions[1])
 					}
 				}
@@ -726,14 +726,14 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 					Groups: []GroupState{
 						{
 							Charon: nil,
-							Proxy: &IpmanPod[ProxyPodSpec]{
+							Proxy: &IpmanPod[RestctlPodSpec]{
 								Meta: PodMeta{
 									Name:      "restctl-pod-test",
 									Namespace: "ipman-system",
 									NodeName:  "test-node",
 									Image:     "test-image",
 								},
-								Spec: ProxyPodSpec{},
+								Spec: RestctlPodSpec{},
 							},
 							Xfrms: []IpmanPod[XfrmPodSpec]{},
 						},
@@ -791,14 +791,14 @@ func TestDiffStatesForPodChanges(t *testing.T) {
 									HostPath: "/test/path",
 								},
 							},
-							Proxy: &IpmanPod[ProxyPodSpec]{
+							Proxy: &IpmanPod[RestctlPodSpec]{
 								Meta: PodMeta{
 									Name:      "restctl-pod-test",
 									Namespace: "ipman-system",
 									NodeName:  "test-node",
 									Image:     "test-image",
 								},
-								Spec: ProxyPodSpec{},
+								Spec: RestctlPodSpec{},
 							},
 							Xfrms: []IpmanPod[XfrmPodSpec]{},
 						},

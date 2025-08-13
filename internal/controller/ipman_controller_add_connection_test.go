@@ -354,7 +354,7 @@ func TestAddIPSecConnection(t *testing.T) {
 			} else if a.Pod.Meta.NodeName == "node1" {
 				node1CharonActions++
 			}
-		case *CreatePodAction[ProxyPodSpec]:
+		case *CreatePodAction[RestctlPodSpec]:
 			if a.Pod.Meta.NodeName == "node2" {
 				node2ProxyActions++
 			} else if a.Pod.Meta.NodeName == "node1" {
