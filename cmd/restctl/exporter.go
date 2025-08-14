@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
@@ -365,11 +366,12 @@ func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 	deduplicatedSas := map[string]saInfo{}
 	for _, ikeInfo := range deduplicatedIkes {
 		for _, childInfo := range ikeInfo.LoadedIKE.Children {
-			_, ok := deduplicatedSas[childInfo.Name]
+			ident := fmt.Sprintf("%s-%s", childInfo.Name, ikeInfo.LoadedIKE.Name)
+			_, ok := deduplicatedSas[ident]
 			if !ok {
-				deduplicatedSas[childInfo.Name] = saInfo{Count: 0, LoadedChild: childInfo, Parent: ikeInfo.LoadedIKE.Name, ParentState: ikeInfo.LoadedIKE.State}
+				deduplicatedSas[ident] = saInfo{Count: 0, LoadedChild: childInfo, Parent: ikeInfo.LoadedIKE.Name, ParentState: ikeInfo.LoadedIKE.State}
 			}
-			val := deduplicatedSas[childInfo.Name]
+			val := deduplicatedSas[ident]
 			val.Count += 1
 			loadedIdInt, _ := strconv.ParseInt(val.LoadedChild.UniqueId, 10, 64)
 			childInfoIdInt, _ := strconv.ParseInt(childInfo.UniqueId, 10, 64)
@@ -377,7 +379,7 @@ func (c *StrongswanCollector) Collect(ch chan<- prometheus.Metric) {
 			if loadedIdInt < childInfoIdInt {
 				val.LoadedChild = childInfo
 			}
-			deduplicatedSas[childInfo.Name] = val
+			deduplicatedSas[ident] = val
 		}
 	}
 

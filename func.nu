@@ -15,4 +15,4 @@ loop {let running = (kubectl get pods -n ipman-system -o json | from json | get 
 print "Done"
 
 print "Applying samples"
-kubectl apply -f samples/vlan.yaml -f samples/charonsample.yaml -f samples/charon2sample.yaml  
+kubectl apply -f samples/vlan.yaml -f samples/charonsample.yaml # -f samples/charon2sample.yaml  

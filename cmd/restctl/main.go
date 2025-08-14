@@ -373,10 +373,6 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 					if err != nil {
 						fmt.Println("Err unloading conn: ", err)
 					}
-				} else {
-					for _, confii := range data.Configs {
-						fmt.Println(confii.IPSecConnection.Name)
-					}
 				}
 			}
 		}
