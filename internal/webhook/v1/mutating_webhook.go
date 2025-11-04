@@ -244,6 +244,9 @@ func createEnvPatch(p *corev1.Pod, ip string) []jsonPatch {
 				Value: addr,
 			},
 		}
+		for _, e := range p.Spec.Containers[i].Env {
+			env = append(env, e)
+		}
 		patch = append(patch, jsonPatch{
 			Op:    "add",
 			Path:  fmt.Sprintf("/spec/containers/%d/env", i),
