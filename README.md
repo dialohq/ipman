@@ -174,6 +174,9 @@ Charon, the IKE daemon from StrongSwan, operates on user-specified nodes, with i
 ## Acknowledgments
 Special thanks to [LarsTi](https://github.com/LarsTi/ipsec_exporter/) for his ipsec_exporter repository, which we've adapted for our use case.
 
+## TODO
+- [ ] Move away from parsing swanctl output in restctl (could use TDT-AG/swanmon) 
+
 ## License
 
 This project is licensed under the [MIT License](./LICENSE).
