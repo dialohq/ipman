@@ -296,7 +296,7 @@ func getConfigs(w http.ResponseWriter, r *http.Request) {
 	v := NewReconcileVisitor(conns, sas)
 
 	json.NewEncoder(w).Encode(comms.ConfigRequest{
-		Conns: slices.Collect(maps.Keys(v.SasConnections)),
+		Conns: slices.Collect(maps.Keys(v.SasChildren)),
 		Error: nil,
 	})
 }
@@ -451,6 +451,17 @@ func RestartConnection(connName string, logger *slog.Logger) error {
 	return nil
 }
 
+// RestartChild attempts to restart a child connection
+func RestartChild(childName, connName string, logger *slog.Logger) error {
+	output, err := swanctl("--initiate", "--child", childName, "--ike", connName, "--timeout", "3")
+	if err != nil {
+		logger.Error("Failed to restart child connection", "child", childName, "conn", connName, "err", err, "output", output)
+		return fmt.Errorf("failed to restart child connection %s: %w", childName, err)
+	}
+	logger.Info("Successfully initiated child connection", "child", childName, "conn", connName, "output", output)
+	return nil
+}
+
 func reconcileIPSec(conns, sas *swanparse.SwanAST) error {
 	handler := slog.NewJSONHandler(os.Stdout, nil)
 	logger := slog.New(handler)
@@ -477,11 +488,13 @@ func reconcileIPSec(conns, sas *swanparse.SwanAST) error {
 		}
 
 		// Restart missing child connections
-		for child := range reconciler.MissingChildren {
-			if err := RestartConnection(child, logger); err != nil {
-				logger.Error("Error restarting child connection", "child", child, "err", err)
-			} else {
-				logger.Info("Successfully restarted child connection", "child", child)
+		for conn, children := range reconciler.MissingChildren {
+			for _, child := range children {
+				if err := RestartChild(child, conn, logger); err != nil {
+					logger.Error("Error restarting child connection", "child", child, "conn", conn, "err", err)
+				} else {
+					logger.Info("Successfully restarted child connection", "child", child, "conn", conn)
+				}
 			}
 		}
 	}

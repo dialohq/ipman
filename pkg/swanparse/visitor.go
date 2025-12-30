@@ -5,21 +5,19 @@ type SwanASTVisitor interface {
 	VisitAST(ast *SwanAST) error
 	VisitEntry(entry *Entry) error
 	VisitConn(conn *Conn) error
-	VisitEntity(entity *Entity) error
-	VisitBlock(block *Block) error
-	VisitOption(option *Option) error
+	VisitEntity(entity *Entity, conn *Conn) error
+	VisitBlock(block *Block, conn *Conn) error
+	VisitOption(option *Option, conn *Conn) error
 }
 
-// ConnectionCollector collects all connection names
+// ConnectionCollector collects all connection names and children
 type ConnectionCollector struct {
-	Connections map[string]bool
-	Children    map[string]bool
+	Children map[string]map[string]bool
 }
 
 func NewConnectionCollector() *ConnectionCollector {
 	return &ConnectionCollector{
-		Connections: make(map[string]bool),
-		Children:    make(map[string]bool),
+		Children: make(map[string]map[string]bool),
 	}
 }
 
@@ -43,13 +41,15 @@ func (c *ConnectionCollector) VisitEntry(entry *Entry) error {
 	return nil
 }
 
-// Override VisitConn to collect connection names
+// Override VisitConn to collect connection names and initialize children map
 func (c *ConnectionCollector) VisitConn(conn *Conn) error {
-	c.Connections[conn.Name] = true
+	if c.Children[conn.Name] == nil {
+		c.Children[conn.Name] = make(map[string]bool)
+	}
 
 	// Process child entities in the connection body
 	for _, entity := range conn.Body {
-		if err := c.VisitEntity(entity); err != nil {
+		if err := c.VisitEntity(entity, conn); err != nil {
 			return err
 		}
 	}
@@ -57,23 +57,23 @@ func (c *ConnectionCollector) VisitConn(conn *Conn) error {
 }
 
 // Override VisitEntity to ensure we call our methods
-func (c *ConnectionCollector) VisitEntity(entity *Entity) error {
+func (c *ConnectionCollector) VisitEntity(entity *Entity, conn *Conn) error {
 	if entity.Block != nil {
-		return c.VisitBlock(entity.Block)
+		return c.VisitBlock(entity.Block, conn)
 	}
 	if entity.Option != nil {
-		return c.VisitOption(entity.Option)
+		return c.VisitOption(entity.Option, conn)
 	}
 	return nil
 }
 
 // Override VisitOption with empty implementation
-func (c *ConnectionCollector) VisitOption(option *Option) error {
+func (c *ConnectionCollector) VisitOption(option *Option, conn *Conn) error {
 	return nil
 }
 
 // Override VisitBlock to collect children information
-func (c *ConnectionCollector) VisitBlock(block *Block) error {
+func (c *ConnectionCollector) VisitBlock(block *Block, conn *Conn) error {
 	// Look for child-sas blocks (in SA listings)
 	if block.Name == "child-sas" {
 		for _, entity := range block.Body {
@@ -82,7 +82,8 @@ func (c *ConnectionCollector) VisitBlock(block *Block) error {
 				for _, childEntity := range entity.Block.Body {
 					if childEntity.Option != nil && childEntity.Option.Key == "name" &&
 						childEntity.Option.Value != nil && childEntity.Option.Value.Single != nil {
-						c.Children[*childEntity.Option.Value.Single] = true
+						childName := *childEntity.Option.Value.Single
+						c.Children[conn.Name][childName] = true
 						break
 					}
 				}
@@ -92,14 +93,15 @@ func (c *ConnectionCollector) VisitBlock(block *Block) error {
 	} else if block.Name == "children" {
 		for _, entity := range block.Body {
 			if entity.Block != nil {
-				c.Children[entity.Block.Name] = true
+				childName := entity.Block.Name
+				c.Children[conn.Name][childName] = true
 			}
 		}
 	}
 
 	// Process all entities in the block
 	for _, entity := range block.Body {
-		if err := c.VisitEntity(entity); err != nil {
+		if err := c.VisitEntity(entity, conn); err != nil {
 			return err
 		}
 	}
