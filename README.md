@@ -9,7 +9,6 @@ IPMan is a Kubernetes operator that simplifies the management of IPSec connectio
 - Creates and manages IPSec VPN connections between Kubernetes nodes and remote endpoints
 - Handles routing configuration automatically
 - Provides IP pool management for your workloads
-- Enables secure communication through VPN tunnels
 
 ## Installation
 
@@ -40,7 +39,27 @@ IPMan requires a secret for IPSec authentication:
 kubectl create secret generic ipsec-secret -n default --from-literal=example=yourpresharedkey
 ```
 
-### Step 2: Create an IPSecConnection
+### Step 2: Create a charon group
+Charon groups can contain many IPSec connections.
+Usually a charon group will look like this:
+
+```yaml
+apiVersion: ipman.dialo.ai/v1
+kind: CharonGroup
+metadata:
+  name: charongroup1
+  namespace: default
+spec:
+  hostNetwork: true
+  nodeName: node1
+```
+Here we specify that the other side of the VPN connections points to an IP address
+assigned to a host interface on one of our nodes `node1`.
+
+For example we could have a `enp0s1` interface with an address `192.168.10.201` on `node1`
+the next steps assume this is the case.
+
+### Step 3: Create an IPSecConnection
 
 Create an IPSecConnection Custom Resource (CR) to establish a VPN connection:
 
@@ -52,10 +71,10 @@ metadata:
   namespace: ipman-system
 spec:
   name: "example"
-  remoteAddr: "192.168.1.2"
-  localAddr: "192.168.1.1"
-  localId: "192.168.1.1"
-  remoteId: "192.168.1.2"
+  remoteAddr: 192.168.10.204
+  remoteId: 192.168.10.204
+  localAddr: 192.168.10.201
+  localId: 192.168.10.201
   secretRef:
     name: "ipsec-secret"
     namespace: default
@@ -73,19 +92,32 @@ spec:
         - "10.0.1.0/24"
       xfrm_ip: "10.0.2.1/24"
       vxlan_ip: "10.0.2.2/24"
-      if_id: 102
+      if_id: 101
       ip_pools:
         primary:
           - "10.0.2.3/24"
           - "10.0.2.4/24"
-  nodeName: "your-node-name"
 ```
+This CR looks a lot like StrongSwan configuration file, with following added fields:
+1. secretRef
+ This is the substitute of `secrets` section of the StrongSwan config file.
+ You point it at the secret created in step 1 which contains the PSK.
+2. `xfrm_ip` and `vxlan_ip`
+  These are largly arbitrary with the exception that they have to be in the subnet defined in `local_ips`.
+  For most of use cases you can choose them arbitrarily and make sure they don't conflict between connections and you will be good to go.
+3. `if_id`
+  This has to be unique within a single node since it specifies the ID of an xfrm interface strongswan and the linux kernel use to route
+  IPSec packets.
+4. `ip_pools`
+  This is the list of IP's which will be given out to pods that are supposed to be in the VPN. So again they have to be IP's defined in
+  `local_ips`. They are split into pools. Here we name our pool `primary` but you can use any name. This helps when you share multiple services
+  with the other side of the VPN. You may want to have a pool `service1` and `service2` and in each you would put IP's that the other side of the VPN
+  expects these services to be at.
 
 ### Step 3: Deploy Workloads Using the VPN Connection
 
-To route workload traffic through the VPN tunnel, add specific annotations to your Pods or Deployments. These annotations tell IPMan to allocate IPs from the configured pools and set up the necessary routing.
-
-#### Required Annotations for Worker Pods
+To route workload traffic through the VPN tunnel, add specific annotations to your Pods or Deployments. These annotations tell IPMan to allocate IPs
+from the configured pools and set up the necessary routing.
 
 ```yaml
 apiVersion: apps/v1
@@ -108,33 +140,11 @@ The operator will automatically:
 2. Set up routing for your workloads
 3. Configure bridge FDB entries for communication
 
+If your app requires a specific IP to bind to and you have multiple IP's in a pool you don't necessarily know which pod will
+get which IP. To help with that there is an env var set in all worker pods named `VXLAN_IP` so in this example the pod could
+get the IP `10.0.2.3/24` from the pool and the env var will contain the value `10.0.2.3`.
+
 ## Configuration Reference
-
-### IPSecConnection CR Fields
-
-| Field | Description |
-|-------|-------------|
-| `name` | Name for the IPSec connection |
-| `remoteAddr` | Remote VPN endpoint address |
-| `localAddr` | Local VPN endpoint address |
-| `localId` | Local identification |
-| `remoteId` | Remote identification |
-| `secretRef` | Reference to Kubernetes secret containing pre-shared key |
-| `children` | Map of child connections (for multiple tunnels) |
-| `nodeName` | Kubernetes node to establish connection from |
-
-### Child Connection Fields
-
-| Field | Description |
-|-------|-------------|
-| `name` | Name for the child connection |
-| `local_ips` | List of local networks/IPs for the tunnel |
-| `remote_ips` | List of remote networks/IPs for the tunnel |
-| `xfrm_ip` | IP for the xfrm interface |
-| `vxlan_ip` | IP for the vxlan interface |
-| `if_id` | Interface ID |
-| `ip_pools` | Named IP pools available for allocation |
-| `extra` | Additional StrongSwan configuration options |
 
 ## Troubleshooting
 
