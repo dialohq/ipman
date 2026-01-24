@@ -91,8 +91,8 @@ type InternalError struct {
 }
 
 // Error returns a formatted error string for RequestError
-func (e *InternalError) Error() string {
-	return fmt.Sprintf("Internal error occured in '%s' while doing '%s': %s. Please open an issue on github with this error message. Env: %+v", e.Location, e.Action, e.Err.Error(), e.Environment)
+func (e InternalError) Error() string {
+	return fmt.Sprintf("Internal error occurred in '%s' while doing '%s': %s. Please open an issue on GitHub with this error message. Env: %+v", e.Location, e.Action, e.Err.Error(), e.Environment)
 }
 
 // GetClusterNodes returns a list of all node names in the cluster
@@ -143,7 +143,8 @@ func (r *IPSecConnectionReconciler) GetClusterPodsByType(ctx context.Context, po
 }
 
 // ExtractCharonVolumeSocketPath gets the path to the Charon socket from a pod's volume definitions
-func ExtractCharonVolumeSocketPath(p *corev1.Pod) string {
+func ExtractCharonVolumeSocketPath(p *corev1.Pod, ctx context.Context) string {
+	logger := log.FromContext(ctx)
 	var CharonSocketVolume *corev1.Volume
 	for _, c := range p.Spec.Volumes {
 		if c.Name == ipmanv1.CharonSocketHostVolumeName {
@@ -160,7 +161,7 @@ func ExtractCharonVolumeSocketPath(p *corev1.Pod) string {
 			},
 			Err: fmt.Errorf("CharonSocketVolume is nil"),
 		}
-		fmt.Println(e.Error())
+		logger.Error(e, "Error extracting Charon Volume socket path")
 	}
 	return CharonSocketVolume.HostPath.Path
 }
@@ -177,10 +178,10 @@ func ExtractContainerImage(p *corev1.Pod, containerName string) string {
 }
 
 // CharonFromPod converts a Kubernetes Pod into an IpmanPod with CharonPodSpec
-func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
+func CharonFromPod(p *corev1.Pod, ctx context.Context) IpmanPod[CharonPodSpec] {
 	return IpmanPod[CharonPodSpec]{
 		Spec: CharonPodSpec{
-			HostPath:    ExtractCharonVolumeSocketPath(p),
+			HostPath:    ExtractCharonVolumeSocketPath(p, ctx),
 			HostNetwork: p.Spec.HostNetwork,
 		},
 		Annotations: p.Annotations,
@@ -199,10 +200,10 @@ func CharonFromPod(p *corev1.Pod) IpmanPod[CharonPodSpec] {
 }
 
 // RestctlFromPod converts a Kubernetes Pod into an IpmanPod with ProxyPodSpec
-func RestctlFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
+func RestctlFromPod(p *corev1.Pod, ctx context.Context) IpmanPod[RestctlPodSpec] {
 	return IpmanPod[RestctlPodSpec]{
 		Spec: RestctlPodSpec{
-			HostPath: ExtractCharonVolumeSocketPath(p),
+			HostPath: ExtractCharonVolumeSocketPath(p, ctx),
 		},
 		Group: ipmanv1.CharonGroupRef{
 			Name:      p.Labels[ipmanv1.LabelGroupName],
@@ -219,7 +220,7 @@ func RestctlFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
 }
 
 // GetClusterPodsAs retrieves cluster pods with a specific label and transforms them into typed IpmanPod objects
-func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionReconciler, label string, transformer func(*corev1.Pod) IpmanPod[S]) ([]IpmanPod[S], error) {
+func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionReconciler, label string, transformer func(*corev1.Pod, context.Context) IpmanPod[S]) ([]IpmanPod[S], error) {
 	IpmanPods := []IpmanPod[S]{}
 	ps, err := r.GetClusterPodsByType(ctx, label)
 	if err != nil {
@@ -227,20 +228,21 @@ func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionRec
 	}
 
 	for _, p := range ps {
-		IpmanPods = append(IpmanPods, transformer(&p))
+		IpmanPods = append(IpmanPods, transformer(&p, ctx))
 	}
 	return IpmanPods, nil
 }
 
 // XfrmFromPod converts a Kubernetes Pod into an IpmanPod with XfrmPodSpec,
 // extracting properties and routes from pod annotations
-func (r *IPSecConnectionReconciler) XfrmFromPod(p *corev1.Pod) IpmanPod[XfrmPodSpec] {
+func (r *IPSecConnectionReconciler) XfrmFromPod(p *corev1.Pod, ctx context.Context) IpmanPod[XfrmPodSpec] {
 	specJSON := p.Annotations[ipmanv1.AnnotationSpec]
+	logger := log.FromContext(ctx)
 
 	spec := &XfrmPodSpec{}
 	err := json.Unmarshal([]byte(specJSON), spec)
 	if err != nil {
-		fmt.Printf("Error unmarshaling XfrmPodSpec: %v\n", err)
+		logger.Error(err, "Error unmarshaling XfrmPodSpec")
 	}
 	result := IpmanPod[XfrmPodSpec]{
 		Meta: PodMeta{
