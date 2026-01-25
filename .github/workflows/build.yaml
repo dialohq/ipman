@@ -1,0 +1,19 @@
+name: Build docker
+on:
+  push:
+    branches: ['ci-automation']
+jobs:
+  publish:
+    name: Publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24.1'
+      - uses: ko-build/setup-ko@v0.8
+      - run: |
+          ko resolve -B -f helm-values-template > helm/values.yaml
+          git add helm/values.yaml
+          git commit -m "release(docker): update image docker tags"
+          git push

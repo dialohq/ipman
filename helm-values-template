@@ -12,7 +12,7 @@ global:
 controller:
   podTimeoutSeconds: 60
   replicaCount: 1
-  image: "192.168.10.201:5000/operator@sha256:44f293ea340c469812e430566535976e98e83feb9ae3c000b4e49130319da97e"
+  image: "ko://./cmd/operator"
   pullPolicy: Always
   podSecurityContext:
     runAsNonRoot: true
@@ -33,20 +33,20 @@ caddy:
   pullPolicy: "Always"
 # Restctl service configuration
 restctl:
-  image: "192.168.10.201:5000/restctl@sha256:6d32320cd7d7a494a5af58bcc523051ec44936f87b30bb79dc49cf5ee597fe1f"
+  image: "ko://./cmd/restctl"
   pullPolicy: "Always"
 # Xfrminjector configuration
 xfrminjector:
-  image: "192.168.10.201:5000/xfrminjector@sha256:6671af801f4155779d776ca73191aff92caf8227a9e854662858fa84b03ec41a"
+  image: "ko://./cmd/xfrminjector"
   pullPolicy: "Always"
   ttlSeconds: 120
 # VxlanLord configuration
 vxlandlord:
-  image: "192.168.10.201:5000/vxlandlord@sha256:7e39413121f3ea915032bda892c9ff89b38f940538e29342f7f2005b762233bd"
+  image: "ko://./cmd/vxlandlord"
   pullPolicy: "Always"
 # XfrmMinion configuration
 xfrminion:
-  image: "192.168.10.201:5000/xfrminion@sha256:66653bdf0bc1939c8093034fb84f613ba44c4a9289b4655093d6ed831816f4fd"
+  image: "ko://./cmd/xfrminion"
   pullPolicy: "Always"
 # Charon daemon configuration
 charon:
@@ -76,5 +76,3 @@ serviceAccount:
 # Pod configuration
 podAnnotations: {}
 podLabels: {}
-
----
