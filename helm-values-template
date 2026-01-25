@@ -13,7 +13,7 @@ controller:
   podTimeoutSeconds: 60
   replicaCount: 1
   image: "ko://./cmd/operator"
-  pullPolicy: Always
+  pullPolicy: IfNotPresent
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -30,28 +30,28 @@ controller:
 # Caddy proxy configuration
 caddy:
   image: "caddy:2.10.0-alpine"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # Restctl service configuration
 restctl:
   image: "ko://./cmd/restctl"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # Xfrminjector configuration
 xfrminjector:
   image: "ko://./cmd/xfrminjector"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
   ttlSeconds: 120
 # VxlanLord configuration
 vxlandlord:
   image: "ko://./cmd/vxlandlord"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # XfrmMinion configuration
 xfrminion:
   image: "ko://./cmd/xfrminion"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # Charon daemon configuration
 charon:
   image: "plan9better/charon:latest-dev"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # Webhook configuration
 webhook:
   serviceName: "ipman-webhook-service"
