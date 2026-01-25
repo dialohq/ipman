@@ -71,8 +71,6 @@ rbac:
   clusterRoleBindingName: "ipman-role-binding"
 # Service account configuration
 serviceAccount:
-  create: true
-  automount: true
   annotations: {}
   name: "ipman-service-account"
 # Pod configuration

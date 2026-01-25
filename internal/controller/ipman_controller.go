@@ -21,6 +21,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -57,6 +58,8 @@ type Envs struct {
 	IsMonitoringEnabled      bool
 	MonitoringScrapeInterval string
 	MonitoringReleaseName    string
+	ServiceAccountName       string
+	PodName                  string
 }
 
 // IPSecConnectionReconciler reconciles IPSecConnection resources
@@ -68,6 +71,7 @@ type IPSecConnectionReconciler struct {
 	AllConns                []string
 	ConnectionsStatusMetric *prometheus.GaugeVec
 	NotLoadedMetric         prometheus.Counter
+	EventRecorder           record.EventRecorder
 }
 
 // RequestError represents an error that occurred during a Kubernetes API request
@@ -218,6 +222,27 @@ func RestctlFromPod(p *corev1.Pod) IpmanPod[RestctlPodSpec] {
 	}
 }
 
+func GetClusterIPSecs(ctx context.Context, r *IPSecConnectionReconciler) ([]IPSecConnectionState, error) {
+	IPSecs := ipmanv1.IPSecConnectionList{}
+	err := r.List(ctx, &IPSecs)
+	if err != nil {
+		return nil, err
+	}
+	list := make([]IPSecConnectionState, len(IPSecs.Items))
+	for _, c := range IPSecs.Items {
+		if strings.TrimSpace(c.Name) == "" {
+			continue
+		}
+		list = append(list, IPSecConnectionState{
+			Name:          c.Name,
+			State:         c.Status.State,
+			ChildrenState: c.Status.ChildrenState,
+			Group:         c.Spec.Group,
+		})
+	}
+	return list, nil
+}
+
 // GetClusterPodsAs retrieves cluster pods with a specific label and transforms them into typed IpmanPod objects
 func GetClusterPodsAs[S IpmanPodSpec](ctx context.Context, r *IPSecConnectionReconciler, label string, transformer func(*corev1.Pod) IpmanPod[S]) ([]IpmanPod[S], error) {
 	IpmanPods := []IpmanPod[S]{}
@@ -272,12 +297,17 @@ func FindPod[S IpmanPodSpec](ps []IpmanPod[S], gr ipmanv1.CharonGroupRef) *Ipman
 
 // FindXfrms returns all Xfrm pods that are on the specified node
 func FindXfrms(ps []IpmanPod[XfrmPodSpec], gr ipmanv1.CharonGroupRef) []IpmanPod[XfrmPodSpec] {
-	result := slices.DeleteFunc(ps, func(p IpmanPod[XfrmPodSpec]) bool {
+	return slices.DeleteFunc(ps, func(p IpmanPod[XfrmPodSpec]) bool {
 		return (p.Group.Name != gr.Name || p.Group.Namespace != gr.Namespace)
 	})
-
-	return result
 }
+
+func FindIPSecs(ipsecs []IPSecConnectionState, gr ipmanv1.CharonGroupRef) []IPSecConnectionState {
+	return slices.DeleteFunc(ipsecs, func(c IPSecConnectionState) bool {
+		return (c.Group.Name != gr.Name || c.Group.Namespace != gr.Namespace)
+	})
+}
+
 func hasAnnotations(p *corev1.Pod) bool {
 	_, ok1 := p.Annotations[ipmanv1.AnnotationChildName]
 	_, ok2 := p.Annotations[ipmanv1.AnnotationIpmanName]
@@ -370,18 +400,31 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 		return nil, err
 	}
 
+	IPSecs, err := GetClusterIPSecs(ctx, r)
+	if err != nil {
+		return nil, err
+	}
+
 	sortPods(xfrms)
 	for _, g := range groups.Items {
 		ref := ipmanv1.CharonGroupRef{Name: g.Name, Namespace: g.Namespace}
+
+		// clone to easily filter with slices.delete later
 		xfrmClone := make([]IpmanPod[XfrmPodSpec], len(xfrms))
 		copy(xfrmClone, xfrms)
 
-		nodeXfrms := FindXfrms(xfrmClone, ref)
+		// clone to easily filter with slices.delete later
+		ipsecsClone := make([]IPSecConnectionState, len(IPSecs))
+		copy(ipsecsClone, IPSecs)
+
+		groupXfrms := FindXfrms(xfrmClone, ref)
+		groupIPSecs := FindIPSecs(IPSecs, ref)
 		ns := GroupState{
 			Charon:   FindPod(charons, ref),
 			Proxy:    FindPod(proxies, ref),
-			Xfrms:    nodeXfrms,
+			Xfrms:    groupXfrms,
 			GroupRef: ref,
+			IPSecs:   groupIPSecs,
 		}
 		cs.Groups = append(cs.Groups, ns)
 	}
@@ -408,6 +451,7 @@ func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnect
 	chs := r.CreateCharons(groups)
 	prxs := r.CreateRestctls(cl, groups)
 	xfrms := r.CreateXfrms(cl)
+	ipsecs := createIPSecs(cl)
 	sortPods(xfrms)
 
 	gs := []GroupState{}
@@ -416,11 +460,13 @@ func (r *IPSecConnectionReconciler) CreateClusterNodes(cl []ipmanv1.IPSecConnect
 		ps := FindXfrms(slices.Clone(xfrms), ref)
 		charon := FindPod(chs, ref)
 		proxy := FindPod(prxs, ref)
+		groupIpsecs := FindIPSecs(ipsecs, ref)
 		g := GroupState{
 			Charon:   charon,
 			Proxy:    proxy,
 			Xfrms:    ps,
 			GroupRef: ref,
+			IPSecs:   groupIpsecs,
 		}
 		gs = append(gs, g)
 	}
@@ -674,6 +720,30 @@ func (r *IPSecConnectionReconciler) CreateXfrms(cl []ipmanv1.IPSecConnection) []
 		}
 	}
 	return xfrms
+}
+
+func createIPSecs(cl []ipmanv1.IPSecConnection) []IPSecConnectionState {
+	list := make([]IPSecConnectionState, len(cl))
+	for _, conn := range cl {
+		if strings.TrimSpace(conn.Name) == "" {
+			continue
+		}
+
+		childrenState := make(map[string]string, len(conn.Spec.Children))
+		for name := range conn.Spec.Children {
+			childrenState[name] = "UP"
+		}
+		list = append(list, IPSecConnectionState{
+			Name:          conn.Name,
+			State:         conn.Status.State,
+			ChildrenState: conn.Status.ChildrenState,
+			Group:         conn.Spec.Group,
+		})
+	}
+	slices.SortFunc(list, func(a, b IPSecConnectionState) int {
+		return strings.Compare(a.Name, b.Name)
+	})
+	return list
 }
 
 func (r *IPSecConnectionReconciler) CreateNodes(ctx context.Context) ([]GroupState, error) {
@@ -1206,6 +1276,52 @@ func diffXfrms(desired, current []IpmanPod[XfrmPodSpec]) []Action {
 	return acts
 }
 
+func getIPSec(items []IPSecConnectionState, name string) (IPSecConnectionState, error) {
+	for _, i := range items {
+		if i.Name == name {
+			return i, nil
+		}
+	}
+	return IPSecConnectionState{}, fmt.Errorf("Not found")
+}
+
+func diffIPSecs(desired, current []IPSecConnectionState, restctlIP string) []Action {
+	// There is nothing we can (should) do about missing CR's
+	// so just filter them out in the edge case that
+	// something happened between `List` calls.
+	desiredFiltered := make([]IPSecConnectionState, len(current))
+	acts := make([]Action, 0)
+	for _, dState := range desired {
+		if slices.ContainsFunc(current, func(s IPSecConnectionState) bool {
+			return s.Name == dState.Name && !(s.Name == "")
+		}) {
+			desiredFiltered = append(desiredFiltered, dState)
+		}
+	}
+	// Is everything UP?
+	for _, dState := range desiredFiltered {
+		cState, err := getIPSec(current, dState.Name)
+		if err != nil {
+			continue
+		}
+		if cState.State == "" || cState.ChildrenState == nil {
+			acts = append(acts, &UpdateChildConnectionStatus{ConnectionName: cState.Name})
+		}
+		if cState.State == "Down" {
+			acts = append(acts, &RestartConnectionAction{Name: cState.Name, RestctlIP: restctlIP})
+		}
+		for childName := range dState.ChildrenState {
+			val, ok := cState.ChildrenState[childName]
+			if !ok || cState.State == "" {
+				acts = append(acts, &UpdateChildConnectionStatus{ConnectionName: cState.Name})
+			} else if val != "UP" {
+				acts = append(acts, &RestartChildConnectionAction{ConnectionName: cState.Name, ChildName: childName, RestctlIP: restctlIP})
+			}
+		}
+	}
+	return acts
+}
+
 func findGroup(ref ipmanv1.CharonGroupRef, s *ClusterState) (int, bool) {
 	for i, g := range s.Groups {
 		if g.GroupRef.Name == ref.Name && g.GroupRef.Namespace == ref.Namespace {
@@ -1266,6 +1382,11 @@ func (r *IPSecConnectionReconciler) DiffStates(desired *ClusterState, current *C
 				xfrmActions := diffXfrms(gs.Xfrms, current.Groups[idx].Xfrms)
 				acts = append(acts, xfrmActions...)
 			}
+			// At this point there may not be a restctl pod
+			if current.Groups[idx].Proxy != nil {
+				ipsecActions := diffIPSecs(gs.IPSecs, current.Groups[idx].IPSecs, current.Groups[idx].Proxy.Meta.IP)
+				acts = append(acts, ipsecActions...)
+			}
 		}
 	}
 
@@ -1321,12 +1442,18 @@ func (r *IPSecConnectionReconciler) UpdateStatus(ctx context.Context) (*time.Dur
 // Reconcile implements the reconciliation loop for IPSecConnection resources
 func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
-	logger.Info("Starting reconciler loop")
+	operatorPod := corev1.Pod{}
+	err := r.Get(ctx, types.NamespacedName{Name: r.Env.PodName, Namespace: r.Env.NamespaceName}, &operatorPod)
+	if err != nil {
+		logger.Error(err, "Error fetching current pod")
+	}
+
 	pod := corev1.Pod{}
-	err := r.Get(ctx, req.NamespacedName, &pod)
+	err = r.Get(ctx, req.NamespacedName, &pod)
 	if !apierrors.IsNotFound(err) {
 		if err != nil {
 			logger.Error(err, "Error fetching pod")
+			r.EventRecorder.Event(&operatorPod, "Warning", "FetchPod", err.Error())
 			return ctrl.Result{}, err
 		} else {
 			if pod.Status.PodIP == "" {
@@ -1335,9 +1462,11 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 			}
 		}
 	}
+
 	rq, err := r.UpdateStatus(ctx)
 	ctr := 1
 	for apierrors.IsConflict(err) && ctr <= ipmanv1.UpdateStatusMaxRetries {
+		r.EventRecorder.Event(&operatorPod, "Warning", "UpdateStatus", err.Error())
 		logger.Info("Error updating status, trying again", "tries", fmt.Sprintf("%d/%d", ctr, ipmanv1.UpdateStatusMaxRetries), "error", err)
 		rq, err = r.UpdateStatus(ctx)
 		ctr += 1
@@ -1353,6 +1482,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		if errors.Is(err, &RequestError{}) {
 			return ctrl.Result{}, err
 		}
+		r.EventRecorder.Event(&operatorPod, "Warning", "GetClusterState", err.Error())
 		logger.Error(err, "Error getting cluster state")
 		return ctrl.Result{}, err
 	}
@@ -1363,18 +1493,20 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 			return ctrl.Result{}, err
 		}
 		logger.Error(err, "Error creating desired cluster state")
+		r.EventRecorder.Event(&operatorPod, "Warning", "CreateClusterState", err.Error())
 		return ctrl.Result{}, err
 	}
 
 	cl := &ipmanv1.IPSecConnectionList{}
 	err = r.List(ctx, cl)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("Couldn't list ipmen: %w", err)
+		return ctrl.Result{}, fmt.Errorf("Couldn't list IPSecConnections: %w", err)
 	}
 
 	actions, err := r.DiffStates(desiredState, currentState, cl.Items)
 	if err != nil {
-		return ctrl.Result{}, fmt.Errorf("Error diffing states: %w", err)
+		r.EventRecorder.Event(&operatorPod, "Warning", "DiffStates", err.Error())
+		return ctrl.Result{}, fmt.Errorf("Error comparing states: %w", err)
 	}
 	actionTypes := []string{}
 	for _, a := range actions {
@@ -1393,6 +1525,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 		logger.Info("Doing action", "type", reflect.TypeOf(a))
 		err = a.Do(ctx, r)
 		if err != nil {
+			r.EventRecorder.Event(&operatorPod, "Warning", "DoActionError", fmt.Sprintf("%s: %s", reflect.TypeOf(a), err.Error()))
 			logger.Info("Error executing action", "action", a, "msg", err)
 			return ctrl.Result{}, err
 		}
@@ -1400,6 +1533,7 @@ func (r *IPSecConnectionReconciler) Reconcile(ctx context.Context, req reconcile
 
 	if n := len(r.NotLoadedConns); n != 0 {
 		logger.Info("Some connections not loaded, requing in 3s", "amount", n, "connections", r.NotLoadedConns)
+		r.EventRecorder.Event(&pod, "Warning", "ConnectionNotLoaded", fmt.Sprintf("Connections: %s", strings.Join(r.NotLoadedConns, ",")))
 		return res(rq, time.Second*3), nil
 	}
 

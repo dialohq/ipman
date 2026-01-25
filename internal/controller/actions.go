@@ -3,8 +3,10 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"time"
@@ -152,13 +154,15 @@ type AddRemoteRouteAction struct {
 
 func (a *AddRemoteRouteAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
 	var pod *corev1.Pod
-	for a.Pod.Meta.IP == "" {
+	runOnce := true
+	for a.Pod.Meta.IP == "" || runOnce {
 		var err error
 		pod, err = r.waitForPodReady(types.NamespacedName{Namespace: a.Pod.Meta.Namespace, Name: a.Pod.Meta.Name})
 		if err != nil {
 			return fmt.Errorf("Error waiting for pod ready: %w", err)
 		}
 		a.Pod.Meta.IP = pod.Status.PodIP
+		runOnce = false
 	}
 	url := fmt.Sprintf("http://%s:8080/addRemoteRoute", a.Pod.Meta.IP)
 	resp, err := comms.SendPost(url, comms.RemoteRouteRequest{RemoteIP: a.Route})
@@ -471,6 +475,150 @@ func (a *OverrideConfigAction) Do(ctx context.Context, r *IPSecConnectionReconci
 	}
 	if resp.StatusCode != 200 {
 		return rd
+	}
+	return nil
+}
+
+var ErrConnRestart = errors.New("Restctl failed to restart the connection")
+
+type ConnectionRestartError struct {
+	Connection string
+	Child      string
+}
+
+func (e *ConnectionRestartError) Error() string {
+	if e.Child == "" {
+		return fmt.Sprintf("Error restarting connection '%s': %s", e.Connection, ErrConnRestart)
+	} else {
+		return fmt.Sprintf("Error restarting child '%s' of connection '%s': %s", e.Child, e.Connection, ErrConnRestart)
+	}
+}
+
+func (e *ConnectionRestartError) Unwrap() error {
+	return ErrConnRestart
+}
+
+func (e *ConnectionRestartError) String() string {
+	return e.Error()
+}
+
+func NewConnectionRestartError(connection, child string) error {
+	return fmt.Errorf("%w: %w", &ConnectionRestartError{
+		Connection: connection,
+		Child:      child,
+	}, ErrConnRestart)
+}
+
+type RestartConnectionAction struct {
+	Name      string
+	RestctlIP string
+}
+
+func (a *RestartConnectionAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
+	url := fmt.Sprintf("http://%s:61410/conn-restart", a.RestctlIP)
+	data := comms.RestartConnectionRequest{
+		Name: a.Name,
+	}
+	resp, err := comms.SendPost(url, data)
+	if err != nil {
+		return fmt.Errorf("Error sending request to reload a connection to restctl pod at %s: ", a.RestctlIP, err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("Error reading body of response to request for restarting a child connection: %s", err)
+	}
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Error restarting a connection in restctl pod at %s. Expected status code 200, got: %d", a.RestctlIP, resp.StatusCode)
+	}
+
+	ipsec := ipmanv1.IPSecConnection{}
+	err = r.Get(ctx, types.NamespacedName{Name: a.Name, Namespace: ""}, &ipsec)
+	if err != nil {
+		return fmt.Errorf("Error fetching IPSecConnection for status update after restarting in restctl: %s", err)
+	}
+	if resp.StatusCode == 500 && string(body) == "Action failed" {
+		r.EventRecorder.Event(&ipsec, "Warning", "RestartConnectionActionFailure", fmt.Sprintf("Failed restarting a connection: %s", a.Name))
+		return NewConnectionRestartError(a.Name, "")
+	}
+
+	ipsec.Status.State = "UP"
+	err = r.Status().Update(ctx, &ipsec)
+	if err != nil {
+		return fmt.Errorf("Error updating IPSecConnection after restarting in restctl: %s", err)
+	}
+	r.EventRecorder.Event(&ipsec, "Warning", "RestartConnectionAction", "Initiated restarting this connection")
+	return nil
+}
+
+type RestartChildConnectionAction struct {
+	ConnectionName string
+	ChildName      string
+	RestctlIP      string
+}
+
+func (a *RestartChildConnectionAction) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
+	url := fmt.Sprintf("http://%s:61410/child-restart", a.RestctlIP)
+	data := comms.RestartConnectionChildRequest{
+		ConnectionName: a.ConnectionName,
+		ChildName:      a.ChildName,
+	}
+	resp, err := comms.SendPost(url, data)
+	if err != nil {
+		return fmt.Errorf("Error sending request to reload a connection to restctl pod at %s: ", a.RestctlIP, err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("Error reading body of response to request for restarting a child connection: %s", err)
+	}
+	ipsec := ipmanv1.IPSecConnection{}
+	err = r.Get(ctx, types.NamespacedName{Name: a.ConnectionName, Namespace: ""}, &ipsec)
+	if err != nil {
+		return fmt.Errorf("Error fetching IPSecConnection for status update after restarting in restctl: %s", err)
+	}
+	if resp.StatusCode == 500 && string(body) == "Action failed" {
+		r.EventRecorder.Event(&ipsec, "Warning", "RestartChildConnectionActionFailure", fmt.Sprintf("Failed restarting a child connection: %s", a.ChildName))
+		return NewConnectionRestartError(a.ConnectionName, a.ChildName)
+	}
+
+	if resp.StatusCode != 200 {
+		return fmt.Errorf("Error restarting a connection in restctl pod at %s. Expected status code 200, got: %d", a.RestctlIP, resp.StatusCode)
+	}
+	ipsec.Status.ChildrenState[a.ChildName] = "UP"
+	somethingDown := slices.Contains(slices.Collect(maps.Values(ipsec.Status.ChildrenState)), "Down")
+	if !somethingDown {
+		ipsec.Status.State = "UP"
+	}
+	err = r.Status().Update(ctx, &ipsec)
+	if err != nil {
+		return fmt.Errorf("Error updating IPSecConnection after restarting in restctl: %s", err)
+	}
+	r.EventRecorder.Event(&ipsec, "Normal", "RestartChildConnectionActionSuccess", fmt.Sprintf("Successfully restarted a child connection: %s", a.ChildName))
+	return nil
+}
+
+type UpdateChildConnectionStatus struct {
+	ConnectionName string
+}
+
+func (a *UpdateChildConnectionStatus) Do(ctx context.Context, r *IPSecConnectionReconciler) error {
+	ipsec := ipmanv1.IPSecConnection{}
+	err := r.Get(ctx, types.NamespacedName{Name: a.ConnectionName, Namespace: ""}, &ipsec)
+	if err != nil {
+		return fmt.Errorf("Error fetching IPSecConnection for status update after status wasn't found in diff: %s", err)
+	}
+	// Optimistically set them to up. If that's not the
+	// case restctl will change it back.
+	for cname := range ipsec.Spec.Children {
+		if ipsec.Status.ChildrenState == nil {
+			ipsec.Status.ChildrenState = make(map[string]string, len(ipsec.Spec.Children))
+		}
+		ipsec.Status.ChildrenState[cname] = "UP"
+	}
+	ipsec.Status.State = "UP"
+
+	err = r.Status().Update(ctx, &ipsec)
+	if err != nil {
+		return fmt.Errorf("Error updating IPSecConnection after restarting in restctl: %s", err)
 	}
 	return nil
 }

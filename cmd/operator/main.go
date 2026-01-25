@@ -83,6 +83,7 @@ func main() {
 
 	// TODO: validate everything is not nil else error
 	e := controller.Envs{
+		PodName:                  os.Getenv("POD_NAME"),
 		NamespaceName:            os.Getenv("NAMESPACE_NAME"),
 		XfrminionImage:           os.Getenv("XFRMINION_IMAGE"),
 		VxlandlordImage:          os.Getenv("VXLANDLORD_IMAGE"),
@@ -102,6 +103,7 @@ func main() {
 		MonitoringReleaseName:    os.Getenv("MONITORING_RELEASE_NAME"),
 		WaitForPodTimeoutSeconds: podTimeout,
 		IsTest:                   false,
+		ServiceAccountName:       os.Getenv("SERVICE_ACCOUNT_NAME"),
 	}
 	if e.IsMonitoringEnabled {
 		log.Info("Enabling monitoring", "release", e.MonitoringReleaseName)
@@ -116,6 +118,7 @@ func main() {
 		AllConns:                []string{},
 		ConnectionsStatusMetric: connectionsStatus,
 		NotLoadedMetric:         failedConnectionLoadCnt,
+		EventRecorder:           mgr.GetEventRecorderFor("ipman-controller"),
 	}
 
 	if err = rec.SetupWithManager(mgr); err != nil {

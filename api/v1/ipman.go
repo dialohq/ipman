@@ -23,6 +23,8 @@ type IPSecConnectionStatus struct {
 	XfrmGatewayIPs map[string]string              `json:"xfrmGatewayIp"`
 	FreeIPs        map[string]map[string][]string `json:"freeIps"`
 	PendingIPs     map[string]string              `json:"pendingIps"`
+	State          string                         `json:"state"`
+	ChildrenState  map[string]string              `json:"childrenState"`
 }
 
 // IPSecConnection is the Kubernetes resource for configuring an IPSec connection.

@@ -100,6 +100,14 @@ type GroupState struct {
 	Proxy    *IpmanPod[RestctlPodSpec] `json:"proxy" diff:"proxy"`
 	Xfrms    []IpmanPod[XfrmPodSpec]   `json:"xfrms" diff:"xfrms"`
 	GroupRef ipmanv1.CharonGroupRef
+	IPSecs   []IPSecConnectionState
+}
+
+type IPSecConnectionState struct {
+	Name          string
+	State         string
+	ChildrenState map[string]string
+	Group         ipmanv1.CharonGroupRef
 }
 
 // ClusterState represents the state of all nodes in the cluster

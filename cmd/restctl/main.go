@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -25,7 +26,11 @@ import (
 	"github.com/plan9better/goviciclient"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 var (
@@ -37,6 +42,11 @@ var (
 type CommandResponse struct {
 	Output string `json:"output"`
 	Error  string `json:"error,omitempty"`
+}
+
+type FailureInfo struct {
+	Connection string
+	Child      string
 }
 
 func getExtra(e map[string]string, k string, d string) string {
@@ -276,6 +286,11 @@ func swanctl(args ...string) (string, error) {
 	out, err := cmd.Output()
 	return string(out), err
 }
+func swanctlCombinedOutput(args ...string) (string, error) {
+	cmd := exec.Command("swanctl", args...)
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
 
 func getConfigs(w http.ResponseWriter, r *http.Request) {
 	conns, err := swanctlListConns()
@@ -293,7 +308,7 @@ func getConfigs(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	v := NewReconcileVisitor(conns, sas)
+	v := NewStrongSwanVisitor(conns, sas)
 
 	json.NewEncoder(w).Encode(comms.ConfigRequest{
 		Conns: slices.Collect(maps.Keys(v.SasChildren)),
@@ -441,65 +456,108 @@ func reloadConfig(w http.ResponseWriter, r *http.Request) {
 }
 
 // RestartConnection attempts to restart a connection
-func RestartConnection(connName string, logger *slog.Logger) error {
-	output, err := swanctl("--initiate", "--child", connName, "--timeout", "3")
+func RestartConnection(w http.ResponseWriter, r *http.Request) {
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(h)
+
+	dataBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Error("Failed to restart connection", "conn", connName, "err", err, "output", output)
-		return fmt.Errorf("failed to restart connection %s: %w", connName, err)
+		logger.Error("Error reading body of request for connection restart", "msg", err.Error())
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
 	}
-	logger.Info("Successfully initiated connection", "conn", connName, "output", output)
-	return nil
+
+	data := &comms.RestartConnectionRequest{}
+	err = json.Unmarshal(dataBytes, data)
+	if err != nil {
+		logger.Error("Error unmarshaling body of request for a connection restart", "msg", err.Error())
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
+	}
+	logger.Info("Restarting connection", "connection", data.Name)
+
+	output, err := swanctlCombinedOutput("--initiate", "--ike", data.Name, "--timeout", "3")
+	if err != nil {
+		logger.Error("Failed to restart connection", "conn", data.Name, "err", err, "output", output)
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode("Action failed")
+		return
+	}
+	logger.Info("Successfully initiated connection", "conn", data.Name, "output", output)
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode("OK")
 }
 
-// RestartChild attempts to restart a child connection
-func RestartChild(childName, connName string, logger *slog.Logger) error {
-	output, err := swanctl("--initiate", "--child", childName, "--ike", connName, "--timeout", "3")
+func RestartConnectionChild(w http.ResponseWriter, r *http.Request) {
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	logger := slog.New(h)
+
+	dataBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		logger.Error("Failed to restart child connection", "child", childName, "conn", connName, "err", err, "output", output)
-		return fmt.Errorf("failed to restart child connection %s: %w", childName, err)
+		logger.Error("Error reading body of request for child restart", "msg", err.Error())
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
 	}
-	logger.Info("Successfully initiated child connection", "child", childName, "conn", connName, "output", output)
-	return nil
+
+	data := &comms.RestartConnectionChildRequest{}
+	err = json.Unmarshal(dataBytes, data)
+	if err != nil {
+		logger.Error("Error unmarshaling body of request for a child restart", "msg", err.Error())
+		w.WriteHeader(400)
+		json.NewEncoder(w).Encode("Bad Request")
+		return
+	}
+
+	logger.Info("Restarting child", "connection", data.ConnectionName, "child", data.ChildName)
+
+	output, err := swanctlCombinedOutput("--initiate", "--child", data.ChildName, "--ike", data.ConnectionName, "--timeout", "3")
+	if err != nil {
+		logger.Error("Failed to restart child connection", "child", data.ChildName, "conn", data.ConnectionName, "err", err, "output", output)
+		w.WriteHeader(500)
+		json.NewEncoder(w).Encode("Action failed")
+		return
+	}
+	logger.Info("Successfully initiated child connection", "child", data.ChildName, "conn", data.ConnectionName, "output", output)
+
+	w.WriteHeader(200)
+	json.NewEncoder(w).Encode("OK")
 }
 
-func reconcileIPSec(conns, sas *swanparse.SwanAST) error {
-	handler := slog.NewJSONHandler(os.Stdout, nil)
-	logger := slog.New(handler)
-
-	reconciler := NewReconcileVisitor(conns, sas)
-	err := reconciler.VisitAST(conns)
+func checkStatus(conns, sas *swanparse.SwanAST) ([]FailureInfo, error) {
+	v := NewStrongSwanVisitor(conns, sas)
+	err := v.VisitAST(conns)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	// Handle missing connections and children
-	if len(reconciler.MissingConns) > 0 || len(reconciler.MissingChildren) > 0 {
-		logger.Info("Found missing connections or children",
-			"missing_conns", slices.Collect(maps.Keys(reconciler.MissingConns)),
-			"missing_children", slices.Collect(maps.Keys(reconciler.MissingChildren)))
-
-		// Restart missing connections
-		for conn := range reconciler.MissingConns {
-			if err := RestartConnection(conn, logger); err != nil {
-				logger.Error("Error restarting connection", "conn", conn, "err", err)
-			} else {
-				logger.Info("Successfully restarted connection", "conn", conn)
+	failedConnections := make([]FailureInfo, 0)
+	if len(v.MissingConns) > 0 || len(v.MissingChildren) > 0 {
+		missingConns := slices.Collect(maps.Keys(v.MissingConns))
+		// If a connection is fully failed, all of it's children are
+		// naturally failed too. Let's filter them out
+		maps.DeleteFunc(v.MissingChildren, func(k string, v []string) bool {
+			return slices.Contains(missingConns, k)
+		})
+		for k, v := range v.MissingChildren {
+			for _, child := range v {
+				failedConnections = append(failedConnections, FailureInfo{
+					Connection: k,
+					Child:      child,
+				})
 			}
 		}
-
-		// Restart missing child connections
-		for conn, children := range reconciler.MissingChildren {
-			for _, child := range children {
-				if err := RestartChild(child, conn, logger); err != nil {
-					logger.Error("Error restarting child connection", "child", child, "conn", conn, "err", err)
-				} else {
-					logger.Info("Successfully restarted child connection", "child", child, "conn", conn)
-				}
-			}
+		for _, conn := range missingConns {
+			failedConnections = append(failedConnections, FailureInfo{
+				Connection: conn,
+				Child:      "",
+			})
 		}
 	}
 
-	return nil
+	return failedConnections, nil
 }
 
 func swanctlListConns() (*swanparse.SwanAST, error) {
@@ -533,27 +591,6 @@ func swanctlListSas() (*swanparse.SwanAST, error) {
 	return sasAST, nil
 }
 
-func tryInit(logger *slog.Logger) {
-	connsAST, err := swanctlListConns()
-	if err != nil {
-		logger.Error("error trying to initiate connection reconciliation", "msg", err.Error())
-		return
-	}
-
-	sasAST, err := swanctlListSas()
-	if err != nil {
-		logger.Error("error trying to initiate connection reconciliation", "msg", err.Error())
-		return
-	}
-
-	// Find missing connections and restart them
-	err = reconcileIPSec(connsAST, sasAST)
-	if err != nil {
-		logger.Error("Error reconciling connections", "err", err)
-		return
-	}
-}
-
 func fileExists(path string) (bool, error) {
 	path = strings.TrimSuffix(path, "/")
 	p := strings.Split(path, "/")
@@ -583,64 +620,143 @@ func (l PromLogger) Println(v ...any) {
 	klog.V(5).Info(v...)
 }
 
-func main() {
-	klog.InitFlags(nil)
-	flag.Set("v", "5")
-	flag.Parse()
-
-	h := slog.NewJSONHandler(os.Stdout, nil)
-	log := slog.New(h)
-
-	SOCKETS_DIR := os.Getenv("HOST_SOCKETS_PATH")
-	if !strings.HasSuffix(SOCKETS_DIR, "/") {
-		SOCKETS_DIR = SOCKETS_DIR + "/"
+func waitForViciSock(socketsDir string) error {
+	if !strings.HasSuffix(socketsDir, "/") {
+		socketsDir = socketsDir + "/"
 	}
-	ViciSocketPath := SOCKETS_DIR + "charon.vici"
+	viciSocketPath := socketsDir + "charon.vici"
 
-	ok, err := fileExists(ViciSocketPath)
+	ok, err := fileExists(viciSocketPath)
 	if err != nil {
-		log.Error("Error while checking for socket existence.")
-		os.Exit(1)
+		return fmt.Errorf("Error while checking for socket existence (at path %s): %s", viciSocketPath, err)
 	}
 
 	if !ok {
 		fsw, err := fsnotify.NewWatcher()
 		if err != nil {
-			log.Error("Error creating fs watcher")
-			os.Exit(1)
+			return fmt.Errorf("Error creating fsnotify watcher: %s", err)
 		}
-		err = fsw.Add(SOCKETS_DIR)
+		err = fsw.Add(socketsDir)
 		if err != nil {
-			log.Error("Couldn't add a path to watch", "msg", err, "path", ViciSocketPath)
+			return fmt.Errorf("Couldn't add a path (%s) to watch: %s", viciSocketPath, err)
 		}
 		for {
 			e := <-fsw.Events
-			if e.Name == ViciSocketPath && e.Has(fsnotify.Create) {
+			if e.Name == viciSocketPath && e.Has(fsnotify.Create) {
 				break
 			}
 		}
 	}
+	return nil
+}
 
-	go func() {
+func createK8sClient() (k8sclient client.Client, ctx context.Context, ctxCancel context.CancelFunc, err error) {
+	ctx, ctxCancel = context.WithCancel(context.Background())
+	config, err := rest.InClusterConfig()
+	scheme := runtime.NewScheme()
+	_ = ipmanv1.AddToScheme(scheme)
+
+	if err != nil {
+		err = fmt.Errorf("Error creating config for k8s client: %s", err)
+		return
+	}
+	k8sclient, err = client.New(config, client.Options{
+		Scheme: scheme,
+	})
+	if err != nil {
+		err = fmt.Errorf("Error creating k8s client: %s", err)
+		return
+	}
+	return
+}
+
+func monitorConnections(ch chan<- FailureInfo, log *slog.Logger) {
+	for {
+		var vc *goviciclient.ViciClient
+		var err error
 		for {
-			var vc *goviciclient.ViciClient
-			for {
-				vc, err = goviciclient.NewViciClient(nil)
-				if err != nil {
-					log.Error("Failed to create a vici client...", "msg", err)
-					time.Sleep(time.Second / 3)
-					continue
-				}
-				break
-			}
-			time.Sleep(5 * time.Second)
-			tryInit(log)
-			err = vc.Close()
+			vc, err = goviciclient.NewViciClient(nil)
 			if err != nil {
-				log.Error("Failed to close a vici client", "msg", err)
+				log.Error("Failed to create a vici client", "error", err)
+				time.Sleep(time.Second / 3)
+				continue
 			}
+			break
 		}
-	}()
+
+		connsAST, err := swanctlListConns()
+		if err != nil {
+			log.Error("error trying to initiate connection reconciliation", "msg", err)
+			return
+		}
+
+		sasAST, err := swanctlListSas()
+		if err != nil {
+			log.Error("error trying to initiate connection reconciliation", "msg", err)
+			return
+		}
+
+		failures, err := checkStatus(connsAST, sasAST)
+		if err != nil {
+			log.Error("Error reconciling connections", "err", err)
+			return
+		}
+		for _, f := range failures {
+			ch <- f
+		}
+		err = vc.Close()
+		if err != nil {
+			log.Error("Failed to close a vici client", "msg", err)
+		}
+		time.Sleep(5 * time.Second)
+	}
+}
+
+func downgradeConnectionStatus(ch <-chan FailureInfo, k8sclient client.Client, ctx context.Context, log *slog.Logger) {
+	for {
+		fi := <-ch
+		ipsec := ipmanv1.IPSecConnection{}
+		err := k8sclient.Get(ctx, types.NamespacedName{Name: fi.Connection}, &ipsec)
+		if err != nil {
+			log.Error("Error fetching IPSecConnection for status update", "msg", err)
+			continue
+		}
+		if fi.Child == "" {
+			ipsec.Status.State = "Down"
+		} else {
+			ipsec.Status.State = "Degraded"
+			if ipsec.Status.ChildrenState == nil {
+				ipsec.Status.ChildrenState = make(map[string]string, 1)
+			}
+			ipsec.Status.ChildrenState[fi.Child] = "Down"
+		}
+		err = k8sclient.Status().Update(ctx, &ipsec)
+		if err != nil {
+			log.Error("Error updating IPSecConnection status", "msg", err)
+		}
+	}
+}
+
+func main() {
+	klog.InitFlags(nil)
+	flag.Set("v", "5")
+	flag.Parse()
+	h := slog.NewJSONHandler(os.Stdout, nil)
+	log := slog.New(h)
+
+	k8sclient, ctx, ctxCancel, err := createK8sClient()
+	if err != nil {
+		panic(err)
+	}
+
+	err = waitForViciSock(os.Getenv("HOST_SOCKETS_PATH"))
+	if err != nil {
+		panic(err)
+	}
+
+	ch := make(chan FailureInfo, 10)
+	go downgradeConnectionStatus(ch, k8sclient, ctx, log)
+	go monitorConnections(ch, log)
 
 	mux := http.NewServeMux()
 
@@ -653,6 +769,8 @@ func main() {
 	mux.HandleFunc("/p1ng", p0ng)
 	mux.HandleFunc("/reload", reloadConfig)
 	mux.HandleFunc("/configs", getConfigs)
+	mux.HandleFunc("/conn-restart", RestartConnection)
+	mux.HandleFunc("/child-restart", RestartConnectionChild)
 
 	server := http.Server{
 		Handler: mux,
@@ -661,6 +779,7 @@ func main() {
 	listener, err := net.Listen("tcp", ":61410")
 	if err != nil {
 		log.Error("Error listening on port 61410", "msg", err)
+		ctxCancel()
 		os.Exit(1)
 	}
 
@@ -668,11 +787,13 @@ func main() {
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		<-c
+		ctxCancel()
 		os.Exit(0)
 	}()
 
 	log.Info("Listening on socket", "port", 61410)
 	if err := server.Serve(listener); err != nil {
 		log.Error("Couldn't start server on listener", "msg", err)
+		ctxCancel()
 	}
 }

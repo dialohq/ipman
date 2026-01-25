@@ -39,6 +39,10 @@ spec:
             - containerPort: 61410
               name: metrics
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
             - name: NAMESPACE_NAME
               value: {{ .Values.global.namespace }}
             - name: XFRMINION_IMAGE
@@ -77,6 +81,8 @@ spec:
               value: "{{ .Values.global.monitoring.interval }}"
             - name: MONITORING_RELEASE_NAME
               value: "{{ .Values.global.monitoring.release}}"
+            - name: SERVICE_ACCOUNT_NAME
+              value: "{{ .Values.serviceAccount.name }}"
 
           volumeMounts:
           - name: {{ .Values.webhook.volumes.name }}

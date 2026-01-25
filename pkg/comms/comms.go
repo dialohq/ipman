@@ -112,3 +112,12 @@ type ConfigRequest struct {
 	Conns []string `json:"conns"`
 	Error error    `json:"error"`
 }
+
+type RestartConnectionRequest struct {
+	Name string `json:"name"`
+}
+
+type RestartConnectionChildRequest struct {
+	ConnectionName string `json:"connectionName"`
+	ChildName      string `json:"childName"`
+}

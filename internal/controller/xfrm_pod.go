@@ -51,14 +51,9 @@ func (s XfrmPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 
 func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod, groupNsn types.NamespacedName) error {
 	ctx := context.Background()
-	nsn := types.NamespacedName{Name: s.Props.OwnerConnection, Namespace: ""}
-	isc := &ipmanv1.IPSecConnection{}
-	err := r.Get(ctx, nsn, isc)
 	log := log.FromContext(ctx)
-	if err != nil {
-		return fmt.Errorf("Couldn't get ipsec connection for pod '%s': %w", pod.Name, err)
-	}
 
+	var err error
 	for pod.Status.PodIP == "" {
 		pod, err = r.waitForPodReady(types.NamespacedName{Name: pod.Name, Namespace: pod.Namespace})
 		if err != nil {
@@ -163,6 +158,13 @@ func (s XfrmPodSpec) CompleteSetup(r *IPSecConnectionReconciler, pod *corev1.Pod
 
 	if resp.StatusCode != 200 {
 		return fmt.Errorf("Couldn't create vxlan interface for pod '%s' PID: Status code not 200, is %d", pod.Name, resp.StatusCode)
+	}
+
+	nsn := types.NamespacedName{Name: s.Props.OwnerConnection, Namespace: ""}
+	isc := &ipmanv1.IPSecConnection{}
+	err = r.Get(ctx, nsn, isc)
+	if err != nil {
+		return fmt.Errorf("Couldn't get ipsec connection for pod '%s': %w", pod.Name, err)
 	}
 
 	if isc.Status.XfrmGatewayIPs == nil {

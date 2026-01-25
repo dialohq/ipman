@@ -20,6 +20,9 @@ func (s RestctlPodSpec) ApplySpec(p *corev1.Pod, e Envs) {
 		createCharonSocketVolume(s.HostPath),
 	}
 	p.Spec.HostPID = true
+	// This pod needs to update the state of
+	// IPSec connections it manages
+	p.Spec.ServiceAccountName = e.ServiceAccountName
 	p.Spec.Containers = []corev1.Container{
 		{
 			Name:            ipmanv1.RestctlContainerName,
