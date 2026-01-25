@@ -12,8 +12,8 @@ global:
 controller:
   podTimeoutSeconds: 60
   replicaCount: 1
-  image: "ghcr.io/dialohq/ipman/operator@sha256:914ec5150773024b8c31dec2954305087ae65b0dcc5f7bca3b0dca051e4baac2"
-  pullPolicy: Always
+  image: "ghcr.io/dialohq/ipman/operator@sha256:09ecfcf79232210584b2d8a97021966d4a6cc6fe918401017fa77bc48b451dfd"
+  pullPolicy: IfNotPresent
   podSecurityContext:
     runAsNonRoot: true
     seccompProfile:
@@ -30,28 +30,28 @@ controller:
 # Caddy proxy configuration
 caddy:
   image: "caddy:2.10.0-alpine"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # Restctl service configuration
 restctl:
-  image: "ghcr.io/dialohq/ipman/restctl@sha256:527ebc1f8ad2227b35461fffb81947f43d2dd2e3b7aee34b6d3da3efad761b75"
-  pullPolicy: "Always"
+  image: "ghcr.io/dialohq/ipman/restctl@sha256:2b2a5381549c6ed5bfc0bc832d9b20c08dbad8daa6a3c1a6a36fb3a1274ab866"
+  pullPolicy: "IfNotPresent"
 # Xfrminjector configuration
 xfrminjector:
-  image: "ghcr.io/dialohq/ipman/xfrminjector@sha256:45406f54e0f79cb8bdbe99562bf179e4fc7e0323a0acc4a6cf812fb382d55b68"
-  pullPolicy: "Always"
+  image: "ghcr.io/dialohq/ipman/xfrminjector@sha256:cf4fad1f7c89a98ade94bb32a5a9a0606bb5fb210b1626cae5c6b94d0c9a9f44"
+  pullPolicy: "IfNotPresent"
   ttlSeconds: 120
 # VxlanLord configuration
 vxlandlord:
-  image: "ghcr.io/dialohq/ipman/vxlandlord@sha256:a2b81eb0e36a689e7e29f964dc82d74edcf99e93ccaff1bd6cb870f74b9c25ea"
-  pullPolicy: "Always"
+  image: "ghcr.io/dialohq/ipman/vxlandlord@sha256:1ba5cecea4a2910fbc6756bde2890575c103f7b2c318e525bda5547d0f6304b8"
+  pullPolicy: "IfNotPresent"
 # XfrmMinion configuration
 xfrminion:
-  image: "ghcr.io/dialohq/ipman/xfrminion@sha256:ffc52db20dbeaa57d3a1b53b4cd2db70e2770b78e4a5e76f7eff9aaff3280e28"
-  pullPolicy: "Always"
+  image: "ghcr.io/dialohq/ipman/xfrminion@sha256:9878b6a172cbfb02be409e0cedc967a9bc29d314c47c3378d2371b5d092bbdb9"
+  pullPolicy: "IfNotPresent"
 # Charon daemon configuration
 charon:
   image: "plan9better/charon:latest-dev"
-  pullPolicy: "Always"
+  pullPolicy: "IfNotPresent"
 # Webhook configuration
 webhook:
   serviceName: "ipman-webhook-service"
