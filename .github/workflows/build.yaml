@@ -14,6 +14,10 @@ jobs:
       - uses: ko-build/setup-ko@v0.8
       - run: |
           ko resolve -B -f helm-values-template > helm/values.yaml
+
+          git config --global user.name 'Ipman docker build workflow'
+          git config --global user.email 'support@dialo.ai'
+
           git add helm/values.yaml
           git commit -m "release(docker): update image docker tags"
           git push
