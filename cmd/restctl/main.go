@@ -534,7 +534,7 @@ func RestartConnectionChild(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !slices.ContainsFunc(failures, func(f FailureInfo) bool {
-		return f.Connection == data.ConnectionName && f.Child == data.ChildName
+		return f.Connection == data.ConnectionName && (f.Child == data.ChildName || f.Child == "")
 	}) {
 		logger.Info("Child connection is not failed", "connection", data.ConnectionName, "child", data.ChildName)
 		w.WriteHeader(200)

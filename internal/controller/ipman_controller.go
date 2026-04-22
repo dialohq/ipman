@@ -1281,6 +1281,15 @@ func getIPSec(items []IPSecConnectionState, name string) (IPSecConnectionState, 
 	return IPSecConnectionState{}, fmt.Errorf("Not found")
 }
 
+func firstChildName(children map[string]string) (string, bool) {
+	if len(children) == 0 {
+		return "", false
+	}
+	names := slices.Collect(maps.Keys(children))
+	slices.Sort(names)
+	return names[0], true
+}
+
 func diffIPSecs(desired, current []IPSecConnectionState, restctlIP string) []Action {
 	// There is nothing we can (should) do about missing CR's
 	// so just filter them out in the edge case that
@@ -1304,7 +1313,14 @@ func diffIPSecs(desired, current []IPSecConnectionState, restctlIP string) []Act
 			acts = append(acts, &UpdateChildConnectionStatus{ConnectionName: dState.Name})
 		}
 		if cState.State == "Down" {
-			acts = append(acts, &RestartConnectionAction{Name: cState.Name, RestctlIP: restctlIP})
+			if childName, ok := firstChildName(dState.ChildrenState); ok {
+				acts = append(acts, &RestartChildConnectionAction{
+					ConnectionName: cState.Name,
+					ChildName:      childName,
+					RestctlIP:      restctlIP,
+				})
+			}
+			continue
 		}
 		for childName := range dState.ChildrenState {
 			val, ok := cState.ChildrenState[childName]

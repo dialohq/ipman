@@ -1,8 +1,7 @@
 baseImageOverrides:
-  ./cmd/vxlandlord: plan9better/iproute2:latest
-  ./cmd/restctl: plan9better/swanctl:latest
-  ./cmd/xfrminjector: gcr.io/distroless/static
-  ./cmd/xfrminion: plan9better/iproute2:latest
+  dialo.ai/ipman/cmd/restctl: plan9better/swanctl:latest
+  dialo.ai/ipman/cmd/vxlandlord: plan9better/iproute2:latest
+  dialo.ai/ipman/cmd/xfrminion: plan9better/iproute2:latest
+  dialo.ai/ipman/cmd/xfrminjector: gcr.io/distroless/static
 defaultPlatforms:
   - linux/amd64
-  - linux/arm64
