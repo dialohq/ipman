@@ -37,7 +37,6 @@ Common labels
 helm.sh/chart: {{ include "ipman.chart" . }}
 {{ include "ipman.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
-app.kubernetes.io/name: {{ include "ipman.name" . }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
 app.kubernetes.io/managed-by: {{ .Release.Service }}
