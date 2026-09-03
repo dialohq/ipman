@@ -367,7 +367,7 @@ func (r *IPSecConnectionReconciler) GetWorkersState(ctx context.Context) (*Worke
 func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*ClusterState, error) {
 	cs := &ClusterState{
 		Groups:     []GroupState{},
-		PodMonitor: true,
+		PodMonitor: false,
 	}
 	groups := ipmanv1.CharonGroupList{}
 	err := r.List(ctx, &groups)
@@ -375,12 +375,14 @@ func (r *IPSecConnectionReconciler) GetClusterState(ctx context.Context) (*Clust
 		return nil, &RequestError{"List", "CharonGroups", err}
 	}
 
-	pm := &promv1.PodMonitor{}
-	err = r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: ipmanv1.PodMonitorRestctlName}, pm)
-	if err != nil {
-		if !apierrors.IsNotFound(err) {
-			return nil, &RequestError{"Get", "PodMonitor", err}
-		} else {
+	if r.Env.IsMonitoringEnabled {
+		cs.PodMonitor = true
+		pm := &promv1.PodMonitor{}
+		err = r.Get(ctx, types.NamespacedName{Namespace: r.Env.NamespaceName, Name: ipmanv1.PodMonitorRestctlName}, pm)
+		if err != nil {
+			if !apierrors.IsNotFound(err) {
+				return nil, &RequestError{"Get", "PodMonitor", err}
+			}
 			cs.PodMonitor = false
 		}
 	}
