@@ -334,15 +334,8 @@ func createNetAdminSecurityContext() *corev1.SecurityContext {
 		Capabilities: &corev1.Capabilities{
 			Add: []corev1.Capability{"NET_ADMIN"},
 		},
-		// Creating the VXLAN device (cmd/vxlandlord) needs to run as root:
-		// confirmed by reproducing with a minimal netlink.LinkAdd call under
-		// the exact same capability set - it succeeds as uid 0, fails with
-		// "operation not permitted" as any non-root uid, regardless of
-		// NET_ADMIN. This container is injected into an arbitrary workload
-		// pod, whose own pod-level securityContext.runAsUser (if the
-		// workload chooses to run as non-root, e.g. most StatefulSets) would
-		// otherwise be inherited here too. A container-level RunAsUser
-		// overrides the pod-level one, so pin this one to root explicitly.
-		RunAsUser: u.Ptr(int64(0)),
+
+		RunAsUser:    u.Ptr(int64(0)),
+		RunAsNonRoot: u.Ptr(false),
 	}
 }
