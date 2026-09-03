@@ -12,7 +12,7 @@ global:
 controller:
   podTimeoutSeconds: 60
   replicaCount: 1
-  image: "ghcr.io/dialohq/ipman/operator@sha256:99741fceff132e7d50f41f0be86d0cdb503269b54a930d8018491af663817629"
+  image: "ghcr.io/dialohq/ipman/operator@sha256:2c35d748d9dcb9baa8cfe8c9daa026643e979c48e400e95a8a3ecb84a40e065e"
   pullPolicy: IfNotPresent
   podSecurityContext:
     runAsNonRoot: true
