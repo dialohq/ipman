@@ -16,6 +16,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -178,6 +179,20 @@ func translate(ipsec ipmanv1.IPSecConnectionSpec) (*goviciclient.IKEConfig, erro
 	}
 	if val, ok := ipsec.Extra["unique"]; ok {
 		ike.Unique = val
+	} else {
+		// Default to "replace": without an explicit unique policy, charon's
+		// default ("no") allows two IKE_SAs to the same peer identity to
+		// coexist. This happens in practice whenever a manual/automatic
+		// re-initiate races with the connection's own start_action/trap
+		// policy (e.g. during a reauth, or a restctl self-heal initiate
+		// racing an in-flight acquire) - both negotiations succeed, leaving
+		// a duplicate IKE_SA/CHILD_SA pair sharing one reqid. One of the
+		// pair goes untracked by future rekey/reauth scheduling and can be
+		// silently lost without ever logging a delete, orphaning the
+		// tunnel until something notices and manually re-initiates it.
+		// "replace" makes charon tear down the older SA to the same
+		// identity instead of letting both live.
+		ike.Unique = "replace"
 	}
 	if val, ok := ipsec.Extra["over_time"]; ok {
 		ike.OverTime = val
@@ -732,6 +747,49 @@ func monitorConnections(ch chan<- FailureInfo, log *slog.Logger) {
 	}
 }
 
+// selfHealCooldown tracks the last re-initiate attempt per connection/child
+// so a connection that's genuinely unreachable doesn't get hammered with a
+// new swanctl initiate every 5s monitor tick.
+var selfHealCooldown = struct {
+	mu   sync.Mutex
+	last map[string]time.Time
+}{last: make(map[string]time.Time)}
+
+const selfHealCooldownPeriod = 30 * time.Second
+
+// attemptSelfHeal re-initiates a connection or child that monitorConnections
+// found missing. Without this, a dropped IKE_SA/CHILD_SA that never gets an
+// explicit delete logged (see cmd/restctl main.go translate()'s unique
+// default) sits down until a human notices and runs swanctl manually -
+// downgradeConnectionStatus only reported the failure via CR status, nothing
+// ever acted on it.
+func attemptSelfHeal(fi FailureInfo, log *slog.Logger) {
+	key := fi.Connection + "/" + fi.Child
+
+	selfHealCooldown.mu.Lock()
+	if last, ok := selfHealCooldown.last[key]; ok && time.Since(last) < selfHealCooldownPeriod {
+		selfHealCooldown.mu.Unlock()
+		return
+	}
+	selfHealCooldown.last[key] = time.Now()
+	selfHealCooldown.mu.Unlock()
+
+	var output string
+	var err error
+	if fi.Child == "" {
+		log.Info("Self-healing: re-initiating connection", "connection", fi.Connection)
+		output, err = swanctlCombinedOutput("--initiate", "--ike", fi.Connection, "--timeout", "3")
+	} else {
+		log.Info("Self-healing: re-initiating child", "connection", fi.Connection, "child", fi.Child)
+		output, err = swanctlCombinedOutput("--initiate", "--child", fi.Child, "--ike", fi.Connection, "--timeout", "3")
+	}
+	if err != nil {
+		log.Error("Self-heal initiate failed", "connection", fi.Connection, "child", fi.Child, "err", err, "output", output)
+		return
+	}
+	log.Info("Self-heal initiate succeeded", "connection", fi.Connection, "child", fi.Child, "output", output)
+}
+
 func downgradeConnectionStatus(ch <-chan FailureInfo, k8sclient client.Client, ctx context.Context, log *slog.Logger) {
 	for {
 		fi := <-ch
@@ -754,6 +812,8 @@ func downgradeConnectionStatus(ch <-chan FailureInfo, k8sclient client.Client, c
 		if err != nil {
 			log.Error("Error updating IPSecConnection status", "msg", err)
 		}
+
+		go attemptSelfHeal(fi, log)
 	}
 }
 
