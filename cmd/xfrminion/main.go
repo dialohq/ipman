@@ -10,7 +10,6 @@ import (
 
 	"net/http"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -18,6 +17,7 @@ import (
 	"dialo.ai/ipman/pkg/netconfig"
 	u "dialo.ai/ipman/pkg/utils"
 	ip "github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 func addBridgeFDB(w http.ResponseWriter, r *http.Request) {
@@ -57,8 +57,19 @@ func addBridgeFDB(w http.ResponseWriter, r *http.Request) {
 		os.Exit(1)
 	}
 
-	cmd := exec.Command("bridge", "fdb", "append", "00:00:00:00:00:00", "dev", (*link).Attrs().Name, "dst", bfr.CiliumIP)
-	if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
+	// Equivalent to: bridge fdb append 00:00:00:00:00:00 dev <link> dst <CiliumIP>
+	// Done via netlink directly rather than shelling out to the external
+	// `bridge` binary, which is not guaranteed to be present in the
+	// container image (mirrors cmd/vxlandlord's fix for the same issue).
+	fdbEntry := &ip.Neigh{
+		LinkIndex:    (*link).Attrs().Index,
+		Family:       unix.AF_BRIDGE,
+		Flags:        ip.NTF_SELF,
+		State:        ip.NUD_PERMANENT,
+		IP:           net.ParseIP(bfr.CiliumIP),
+		HardwareAddr: net.HardwareAddr{0, 0, 0, 0, 0, 0},
+	}
+	if err := ip.NeighAppend(fdbEntry); err != nil {
 		logger.Error("Error appending to bridge fdb", "msg", err)
 		code := 409
 		writeError(w, err, &code)
@@ -102,17 +113,38 @@ func deleteBridgeFDB(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	cmd := exec.Command("bridge", "fdb", "delete", "00:00:00:00:00:00", "dev", (*link).Attrs().Name, "dst", bfr.CiliumIP)
-	if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
+	// Same netlink-native approach as addBridgeFDB above.
+	fdbEntry := &ip.Neigh{
+		LinkIndex:    (*link).Attrs().Index,
+		Family:       unix.AF_BRIDGE,
+		Flags:        ip.NTF_SELF,
+		State:        ip.NUD_PERMANENT,
+		IP:           net.ParseIP(bfr.CiliumIP),
+		HardwareAddr: net.HardwareAddr{0, 0, 0, 0, 0, 0},
+	}
+	if err := ip.NeighDel(fdbEntry); err != nil {
 		logger.Error("Error appending to bridge fdb", "msg", err)
 		code := 409
 		writeError(w, err, &code)
 		return
 	}
-	command := fmt.Sprintf("bridge fdb show | grep %s | awk '{print $1}' | xargs -I {arg} bridge fdb del {arg} dev %s dst %s", bfr.CiliumIP, (*link).Attrs().Name, bfr.CiliumIP)
-	cmd = exec.Command("bash", "-c", command)
-	if out, err := cmd.CombinedOutput(); string(out) != "" || err != nil {
-		logger.Error("Error deleting mac address bridge fdb entry", "msg", err)
+
+	// Best-effort cleanup of any other FDB entries pointing at this same
+	// dst IP regardless of MAC — equivalent to the old
+	// `bridge fdb show | grep <ip> | ... | xargs bridge fdb del` pipeline,
+	// via netlink instead of shelling out. Non-fatal like the original.
+	neighs, err := ip.NeighList((*link).Attrs().Index, unix.AF_BRIDGE)
+	if err != nil {
+		logger.Error("Error listing bridge fdb entries for cleanup", "msg", err)
+	} else {
+		dstIP := net.ParseIP(bfr.CiliumIP)
+		for i := range neighs {
+			if neighs[i].IP.Equal(dstIP) {
+				if err := ip.NeighDel(&neighs[i]); err != nil {
+					logger.Error("Error deleting mac address bridge fdb entry", "msg", err)
+				}
+			}
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")

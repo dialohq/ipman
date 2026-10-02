@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 
@@ -13,6 +12,7 @@ import (
 	"dialo.ai/ipman/pkg/netconfig"
 	u "dialo.ai/ipman/pkg/utils"
 	ip "github.com/vishvananda/netlink"
+	"golang.org/x/sys/unix"
 )
 
 func createVxlan(underlying *ip.Link, local_ip net.IP, id int) (*ip.Link, error) {
@@ -113,8 +113,18 @@ func main() {
 			"Error preparing ip address to append to bridge fdb",
 		)
 	}
-	cmd := exec.Command("bridge", "fdb", "append", "00:00:00:00:00:00", "dev", "vxlan"+strconv.FormatInt(int64(ifId), 10), "dst", xfrmUnderlyingIp)
-	_, err = cmd.Output()
+	// Equivalent to: bridge fdb append 00:00:00:00:00:00 dev vxlanN dst <xfrmUnderlyingIp>
+	// Done via netlink directly rather than shelling out to the external `bridge`
+	// binary, which is not guaranteed to be present in the container image.
+	fdbEntry := &ip.Neigh{
+		LinkIndex:    (*vxlan).Attrs().Index,
+		Family:       unix.AF_BRIDGE,
+		Flags:        ip.NTF_SELF,
+		State:        ip.NUD_PERMANENT,
+		IP:           net.ParseIP(xfrmUnderlyingIp),
+		HardwareAddr: net.HardwareAddr{0, 0, 0, 0, 0, 0},
+	}
+	err = ip.NeighAppend(fdbEntry)
 	u.Fatal(err, logger, "Error appending to bridge fdb")
 
 	dstWithFullMask := net.IPNet{IP: xfrm_ipnet.IP, Mask: net.CIDRMask(32, 32)}
